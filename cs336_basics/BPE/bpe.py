@@ -1,6 +1,8 @@
 from collections.abc import Iterable, Iterator
 import os.path
 from collections import Counter
+import json
+from typing import Self
 
 from .pretokenization import find_chunk_boundaries, pretokenization
 
@@ -158,11 +160,29 @@ class BPE:
 
     def save(self, path_prefix: str) -> None:
         # 词表、merges 分开保存习惯，并另存特殊 token 等配置。
-        pass
+        vocab_serialized = {i: b.hex() for i, b in self.int2bytes_dict.items()}
+        merges_serialized = [[x.hex(), y.hex()] for (x, y) in self.merges]
+        special_tokens_serialized = {"special_tokens": self.special_tokens}
         
+        with open(f"{path_prefix}.vocab.json", "w") as vf:
+            json.dump(vocab_serialized, vf, ensure_ascii=False, indent=2)
+        with open(f"{path_prefix}.merges.json", "w") as mf:
+            json.dump(merges_serialized, mf, ensure_ascii=False, indent=2)
+        with open(f"{path_prefix}.special_tokens.json", "w") as sf:
+            json.dump(special_tokens_serialized, sf, ensure_ascii=False, indent=2)
 
     def load(self, path_prefix: str) -> None:
-        raise NotImplementedError
+        with open(f"{path_prefix}.vocab.json", "r") as vf:
+            vocab_serialized = json.load(vf)
+        with open(f"{path_prefix}.merges.json", "r") as mf:
+            merges_serialized = json.load(mf)
+        with open(f"{path_prefix}.special_tokens.json", "r") as sf:
+            special_tokens_serialized = json.load(sf)
+
+        self.int2bytes_dict = {int(i): bytes.fromhex(b) for i, b in vocab_serialized.items()}
+        self.bytes2int_dict = {b: int(i) for i, b in self.int2bytes_dict.items()}
+        self.merges = [(bytes.fromhex(x), bytes.fromhex(y)) for x, y in merges_serialized]
+        self.special_tokens = special_tokens_serialized["special_tokens"]
 
     @classmethod
     def from_files(
@@ -170,5 +190,28 @@ class BPE:
         vocab_filepath: str,
         merges_filepath: str,
         special_tokens: list[str] | None = None,
-    ):
-        raise NotImplementedError
+    ) -> Self:
+        with open(vocab_filepath, encoding="utf-8") as vf:
+            vocab_serialized = json.load(vf)
+        with open(merges_filepath, encoding="utf-8") as mf:
+            merges_serialized = json.load(mf)
+
+        if not isinstance(vocab_serialized, dict):
+            raise ValueError("vocab file must contain a JSON object")
+        if not isinstance(merges_serialized, list):
+            raise ValueError("merges file must contain a JSON list")
+
+        vocab = {
+            int(token_id): bytes.fromhex(token_hex)
+            for token_id, token_hex in vocab_serialized.items()
+        }
+        merges = [
+            (bytes.fromhex(left), bytes.fromhex(right))
+            for left, right in merges_serialized
+        ]
+
+        return cls(
+            vocab=vocab,
+            merges=merges,
+            special_tokens=special_tokens,
+        )
