@@ -33,8 +33,10 @@ class BPE:
         merges: list[tuple[bytes, bytes]] | None = None,
         special_tokens: list[str] | None = None,
     ):
-        self.dkd = vocab
-        self.ekd = {v: k for k, v in vocab.items()} if vocab is not None else {}
+        self.int2bytes_dict = vocab
+        self.bytes2int_dict = (
+            {v: k for k, v in vocab.items()} if vocab is not None else {}
+        )
         self.merges = merges if merges is not None else []
         self.special_tokens = list(dict.fromkeys(special_tokens or []))
 
@@ -76,18 +78,18 @@ class BPE:
         for pretoken, cnt in pretoken_counter.items():
             byte_pretoken_counter[bytify(pretoken)] += cnt
 
-
-
-        self.dkd = {i: bytes([i]) for i in range(256)}
+        self.int2bytes_dict = {i: bytes([i]) for i in range(256)}
 
         # Special tokens are part of the requested vocabulary size.
         for special_token in self.special_tokens:
-            self.dkd[len(self.dkd)] = special_token.encode("utf-8")
+            self.int2bytes_dict[len(self.int2bytes_dict)] = special_token.encode(
+                "utf-8"
+            )
 
-        self.ekd = {v: k for k, v in self.dkd.items()}
+        self.bytes2int_dict = {v: k for k, v in self.int2bytes_dict.items()}
         self.merges = []
 
-        while len(self.dkd) < vocab_size:
+        while len(self.int2bytes_dict) < vocab_size:
             pairs_counter = Counter()  # (b"l", b"o"): 5, (b"o", b"w"): 5, ...
 
             for byte_ptk, cnt in byte_pretoken_counter.items():
@@ -103,9 +105,9 @@ class BPE:
 
             self.merges.append(best_pair)
             new_token = best_pair[0] + best_pair[1]
-            new_token_id = len(self.dkd)
-            self.dkd[new_token_id] = new_token
-            self.ekd[new_token] = new_token_id
+            new_token_id = len(self.int2bytes_dict)
+            self.int2bytes_dict[new_token_id] = new_token
+            self.bytes2int_dict[new_token] = new_token_id
 
             # cannot mutate a Counter while iterating over it
             updated_counter = Counter()
@@ -116,18 +118,48 @@ class BPE:
             byte_pretoken_counter = updated_counter
 
     def encode(self, text: str) -> list[int]:
-        raise NotImplementedError
+        ids = []
+        merges_rank = {m: i for i, m in enumerate(self.merges)}
+
+        pretoken_seq = pretokenization(
+            text, self.special_tokens, keep_special_tokens=True
+        )
+        for pretoken_str in pretoken_seq:
+            # pretoken_str: single str splited
+            # special token
+            if pretoken_str in self.special_tokens:
+                ids.append(self.bytes2int_dict[pretoken_str.encode("utf-8")])
+                continue
+            # not special token
+            bytes_token = bytify(pretoken_str)
+            
+            # apply BPE merges to the bytes token
+            while len(bytes_token) > 1:
+                # list all pairs that is in the merges dict
+                all_pairs = [p for p in zip(bytes_token, bytes_token[1:]) if p in merges_rank]
+                if len(all_pairs) == 0:
+                    break
+                
+                best_pair = min(all_pairs, key=lambda x: merges_rank[x])
+                bytes_token = apply_merge(bytes_token, best_pair)
+            
+            ids.extend(self.bytes2int_dict[i] for i in bytes_token)
+            
+
+        return ids
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
         for s in iterable:
             yield from self.encode(s)
 
     def decode(self, ids: list[int]) -> str:
-        raise NotImplementedError
+        byte_str = b"".join(self.int2bytes_dict[id] for id in ids)
+        return byte_str.decode("utf-8", errors="replace")   # !WARN
 
     def save(self, path_prefix: str) -> None:
         # 词表、merges 分开保存习惯，并另存特殊 token 等配置。
-        raise NotImplementedError
+        pass
+        
 
     def load(self, path_prefix: str) -> None:
         raise NotImplementedError
