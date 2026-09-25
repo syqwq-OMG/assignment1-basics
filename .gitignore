@@ -163,5 +163,5 @@ cython_debug/
 *.zip
 
 .DS_Store
-
+ignored/
 tests/fixtures/TinyStories-train.txt

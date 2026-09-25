@@ -1,11 +1,29 @@
 from collections.abc import Iterable, Iterator
-import os.path
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+import heapq
+import multiprocessing
+import os
 from collections import Counter, defaultdict, OrderedDict
 import json
 from typing import Self
 from tqdm.auto import tqdm
 
 from .pretokenization import find_chunk_boundaries, pretokenization
+
+
+class ReverseOrderPair:
+    """Reverse byte-pair ordering for use in Python's min-heap."""
+
+    __slots__ = ("pair",)
+
+    def __init__(self, pair: tuple[bytes, bytes]):
+        self.pair = pair
+
+    def __lt__(self, other: "ReverseOrderPair") -> bool:
+        return self.pair > other.pair
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, ReverseOrderPair) and self.pair == other.pair
 
 
 def bytify(s: str) -> tuple[bytes, ...]:
@@ -27,6 +45,15 @@ def apply_merge(byptk: tuple[bytes, ...], merge: tuple[bytes, bytes]) -> tuple[b
     return tuple(merged_word)
 
 
+def count_pretokens_in_chunk(task: tuple[str | os.PathLike, int, int, tuple[str, ...]]) -> Counter[str]:
+    """Read and pre-tokenize one byte range of the training corpus."""
+    input_path, start, end, special_tokens = task
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk_text = f.read(end - start).decode("utf-8")
+    return Counter(pretokenization(chunk_text, list(special_tokens)))
+
+
 class BPE:
     def __init__(
         self,
@@ -40,7 +67,7 @@ class BPE:
         self.merges_rank: dict[tuple[bytes, bytes], int] = {m: i for i, m in enumerate(merges)} if merges is not None else {}
         self.special_tokens = list(dict.fromkeys(special_tokens or []))
         self.encode_cache: OrderedDict[str, tuple[int, ...]] = OrderedDict()
-        self.CACHE_SIZE_LIMIT = cache_size  # Limit the cache size to avoid excessive memory usage
+        self.CACHE_SIZE_LIMIT: int = cache_size  # Limit the cache size to avoid excessive memory usage
 
     def get_vocab(self) -> dict[int, bytes]:
         return self.int2bytes_dict
@@ -63,7 +90,7 @@ class BPE:
             # Remove the oldest item from the cache
             self.encode_cache.popitem(last=False)
 
-    def train(self, input_path: str, vocab_size: int) -> None:
+    def train(self, input_path: str | os.PathLike, vocab_size: int, num_threads: int | None = None) -> None:
         # 训练后设置 self.vocab 和 self.merges，并重建编码查找表。
         if not os.path.isfile(input_path):
             raise FileNotFoundError(f"Input file {input_path} does not exist")
@@ -73,6 +100,8 @@ class BPE:
         minimum_vocab_size = 256 + len(self.special_tokens)
         if vocab_size < minimum_vocab_size:
             raise ValueError(f"vocab_size must be at least {minimum_vocab_size}")
+        if num_threads is not None and num_threads < 1:
+            raise ValueError("num_threads must be at least 1")
 
         pretoken_tid: dict[str, int] = defaultdict(int)  # {"low": 0, "lowe": 1, ...}
         tid_pretoken_bytes: dict[int, tuple[bytes, ...]] = defaultdict(tuple)  # {0: (b"l", b"o", b"w"), 1: (b"o", b"w"), ...}
@@ -82,28 +111,44 @@ class BPE:
         )  # (b"l", b"o"): {0, 1, 2}, (b"o", b"w"): {0, 1, 2}, ... where the pair occurs
         pairs_counter: dict[tuple[bytes, bytes], int] = Counter()  # (b"l", b"o"): 5, (b"o", b"w"): 5, ...
 
-        # get pretoken counts
+        # Split the corpus once, then independently read and pre-tokenize each
+        # byte range in a worker thread or process.
         with open(input_path, "rb") as f:
-            # get chunks
             chunk_boundaries = find_chunk_boundaries(
                 f, desired_num_chunks=10, split_special_token=(token.encode("utf-8") for token in self.special_tokens)
             )
 
-            # process within each chunk
-            for i in range(len(chunk_boundaries) - 1):
-                f.seek(chunk_boundaries[i])
-                chunk_data = f.read(chunk_boundaries[i + 1] - chunk_boundaries[i])  # bytes info
-                chunk_text = chunk_data.decode("utf-8")  # decode to str
-                # count the frequency of pretoken to more conveniently count byte level frequencies
-                for pretoken in pretokenization(chunk_text, self.special_tokens):
-                    if pretoken not in pretoken_tid:
-                        tid = len(pretoken_tid)
-                        pretoken_tid[pretoken] = tid
-                        tid_pretoken_bytes[tid] = bytify(pretoken)
-                        tid_counter[tid] = 1
-                    else:
-                        tid = pretoken_tid[pretoken]
-                        tid_counter[tid] += 1
+        special_tokens = tuple(self.special_tokens)
+        chunk_tasks = [(input_path, chunk_boundaries[i], chunk_boundaries[i + 1], special_tokens) for i in range(len(chunk_boundaries) - 1)]
+        pretoken_counter: Counter[str] = Counter()
+
+        # determine whether to use threads or processes based on the file size and user preference
+        if num_threads is not None:
+            executor_type = ThreadPoolExecutor
+            worker_count = min(num_threads, len(chunk_tasks))
+            executor_kwargs = {}
+        elif os.path.getsize(input_path) >= 64 * 1024 * 1024:
+            executor_type = ProcessPoolExecutor
+            worker_count = min(4, os.cpu_count() or 1, len(chunk_tasks))
+            start_method = "fork" if "fork" in multiprocessing.get_all_start_methods() else "spawn"
+            executor_kwargs = {"mp_context": multiprocessing.get_context(start_method)}
+        else:
+            executor_type = ThreadPoolExecutor
+            worker_count = 1
+            executor_kwargs = {}
+
+        # do pretokenization in parallel using the chosen executor type
+        with executor_type(max_workers=worker_count, **executor_kwargs) as executor:
+            chunk_counters = executor.map(count_pretokens_in_chunk, chunk_tasks)
+            
+            for chunk_counter in tqdm(chunk_counters, total=len(chunk_tasks), desc="Pretokenizing", unit="chunk", disable=None):
+                pretoken_counter.update(chunk_counter)
+
+        for pretoken, count in pretoken_counter.items():
+            tid = len(pretoken_tid)
+            pretoken_tid[pretoken] = tid
+            tid_pretoken_bytes[tid] = bytify(pretoken)
+            tid_counter[tid] = count
 
         # get pairs_tids and pairs_counter
         for tid, byte_ptk in tid_pretoken_bytes.items():
@@ -114,8 +159,10 @@ class BPE:
                 pairs_tids[pair].add(tid)
                 pairs_counter[pair] += current_count
 
+        # =======================================================================
+        # ||               pretoken finish, now training, merging               ||
+        # =======================================================================
         self.int2bytes_dict = {i: bytes([i]) for i in range(256)}
-
         # Special tokens are part of the requested vocabulary size.
         for special_token in self.special_tokens:
             self.int2bytes_dict[len(self.int2bytes_dict)] = special_token.encode("utf-8")
@@ -123,11 +170,20 @@ class BPE:
         self.bytes2int_dict = {v: k for k, v in self.int2bytes_dict.items()}
         self.merges_rank = {}
 
+        pair_heap = [(-count, ReverseOrderPair(pair)) for pair, count in pairs_counter.items()]
+        heapq.heapify(pair_heap)
+
         progress = tqdm(total=vocab_size - len(self.int2bytes_dict), desc="Training BPE", unit="merge", disable=None)
         while len(self.int2bytes_dict) < vocab_size:
-            # first freq second lexicographically
-            best_pair = max(pairs_counter, key=lambda x: (pairs_counter[x], x), default=None)
-            if best_pair is None or pairs_counter[best_pair] <= 0:
+            best_pair = None
+            while pair_heap:
+                neg_count, wrapped_pair = heapq.heappop(pair_heap)
+                candidate = wrapped_pair.pair
+                # lazy update, use the counter to check if the count is still valid
+                if pairs_counter.get(candidate) == -neg_count:
+                    best_pair = candidate
+                    break
+            if best_pair is None:
                 break
 
             self.merges_rank[best_pair] = len(self.merges_rank)
@@ -162,10 +218,15 @@ class BPE:
                 pairs_tids[p] |= tids
 
             affected_pairs = pairs_discard_ids.keys() | pairs_add_ids.keys()
-            dead_pairs = [p for p in affected_pairs if pairs_counter[p] <= 0]
-            for p in dead_pairs:
-                pairs_counter.pop(p, None)
-                pairs_tids.pop(p, None)
+
+            for p in affected_pairs:
+                count = pairs_counter.get(p, 0)
+                if count > 0:
+                    heapq.heappush(pair_heap, (-count, ReverseOrderPair(p)))
+                else:
+                    # remove 0 count pairs from the counter
+                    pairs_counter.pop(p, None)
+                    pairs_tids.pop(p, None)
 
             progress.update(1)
 
