@@ -594,4 +594,4 @@ def run_train_bpe(
     """
     bpe = BPE(special_tokens=special_tokens)
     bpe.train(input_path, vocab_size)
-    return bpe.int2bytes_dict, bpe.merges
+    return bpe.get_vocab(), bpe.get_merges()

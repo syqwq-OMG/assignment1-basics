@@ -48,3 +48,5 @@ gunzip owt_valid.txt.gz
 cd ..
 ```
 
+## maybe
++ [bpe.py](./cs336_basics/BPE/bpe.py) may be use multi-thred to deal with the chunked data? and hope use incremental update to avoid re-computing the whole data. 
