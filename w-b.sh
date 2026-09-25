@@ -1,5 +1,5 @@
 uv run wandb login
-export WANDB_ENTITY="你的实际entity"
+export WANDB_ENTITY="syqwq"
 export WANDB_PROJECT="lmfs-assignment1"
 export WANDB_MODE="online"
 export PYTHONIOENCODING="utf-8"

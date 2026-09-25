@@ -9,8 +9,7 @@ import wandb
 @contextmanager
 def experiment(task, config, root="."):
     root = Path(root).resolve()
-    skipped = {".git", ".venv", "venv", "outputs", "wandb", "data",
-               "datasets", "checkpoints", "__pycache__", ".pytest_cache"}
+    skipped = {".git", ".venv", "venv", "outputs", "wandb", "data", "datasets", "checkpoints", "__pycache__", ".pytest_cache"}
     suffixes = {".py", ".sh", ".ipynb", ".cu", ".c", ".cpp", ".h", ".rs"}
     sources = []
     for directory, dirs, names in os.walk(root):
@@ -18,16 +17,21 @@ def experiment(task, config, root="."):
         for name in sorted(names):
             path = Path(directory) / name
             rel = path.relative_to(root)
-            if (path.suffix in suffixes
+            if (
+                path.suffix in suffixes
                 or name in {"pyproject.toml", "uv.lock", ".python-version"}
-                or (rel.parts[0] == "configs" and path.suffix in {".json", ".yaml", ".yml", ".toml"})):
+                or (rel.parts[0] == "configs" and path.suffix in {".json", ".yaml", ".yml", ".toml"})
+            ):
                 sources.append(path)
     with wandb.init(
         entity=os.environ["WANDB_ENTITY"],
         project=os.environ.get("WANDB_PROJECT", "lmfs-assignment1"),
-        id=uuid.uuid4().hex[:12], resume="never",
+        id=uuid.uuid4().hex[:12],
+        resume="never",
         name=f"{os.environ['STUDENT_ID']}-{task}",
-        group=os.environ["STUDENT_ID"], job_type=task, config=config,
+        group=os.environ["STUDENT_ID"],
+        job_type=task,
+        config=config,
         settings=wandb.Settings(console="wrap"),
     ) as run:
         out = root / "outputs" / run.id
@@ -43,8 +47,7 @@ def experiment(task, config, root="."):
             frozen.parent.mkdir(parents=True, exist_ok=True)
             frozen.write_bytes(content)
             artifact.add_file(str(frozen), name=rel)
-            lines = "\n".join(f"{i:05d} | {line}" for i, line in
-                              enumerate(content.decode("utf-8-sig").splitlines(), 1))
+            lines = "\n".join(f"{i:05d} | {line}" for i, line in enumerate(content.decode("utf-8-sig").splitlines(), 1))
             block = f"===== SOURCE {rel} SHA256={digest} =====\n{lines}\n"
             print(block, flush=True)
             dump.append(block)
@@ -56,9 +59,11 @@ def experiment(task, config, root="."):
         try:
             yield run
         finally:
-            changed = [str(path.relative_to(root)) for path, digest in hashes.items()
-                       if not path.is_file()
-                       or hashlib.sha256(path.read_bytes()).hexdigest() != digest]
+            changed = [
+                str(path.relative_to(root))
+                for path, digest in hashes.items()
+                if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+            ]
             run.summary["source_changed"] = changed
             if changed:
                 print("WARNING: 运行中源码发生变化：", changed, flush=True)
