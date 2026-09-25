@@ -40,6 +40,7 @@ extra-index-url = ["https://mirrors.aliyun.com/pypi/simple/"]
 log_cli = true
 log_cli_level = "WARNING"
 addopts = "-s"
+norecursedirs = [".git", ".venv", "outputs", "wandb"]
 
 [tool.ruff]
 line-length = 150
