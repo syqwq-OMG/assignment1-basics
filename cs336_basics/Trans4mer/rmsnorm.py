@@ -5,9 +5,17 @@ from jaxtyping import Float
 
 
 class RMSNorm(nn.Module):
-    def __init__(self, d_model:int, eps:float=1e-5, device: torch.device = None, dtype: torch.dtype = None):
+    def __init__(self, d_model: int, eps: float = 1e-5, device: torch.device = None, dtype: torch.dtype = None):
         super().__init__()
-        pass
-    
+        self.eps = eps
+        self.weights: Float[torch.tensor, "d_model"] = nn.Parameter(torch.ones((d_model,), device=device, dtype=dtype))
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        pass
+        in_type = x.dtype
+        x.to(torch.float32)
+        
+        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
+        
+        result = x / rms
+        result = result * self.weights
+        return result.to(in_type)
