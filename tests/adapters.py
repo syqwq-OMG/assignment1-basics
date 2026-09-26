@@ -14,7 +14,7 @@ from cs336_basics.BPE.bpe import BPE
 from cs336_basics.Trans4mer.embedding import Embedding
 from cs336_basics.Trans4mer.linear import Linear
 from cs336_basics.Trans4mer.rmsnorm import RMSNorm
-
+from cs336_basics.Trans4mer.swiglu import SwiGLU
 
 def run_linear(d_in: int, d_out: int, weights: Float[Tensor, " d_out d_in"], in_features: Float[Tensor, " ... d_in"]) -> Float[Tensor, " ... d_out"]:
     """
@@ -84,7 +84,11 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.w1.weights.data = w1_weight
+    swiglu.w2.weights.data = w2_weight
+    swiglu.w3.weights.data = w3_weight
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
