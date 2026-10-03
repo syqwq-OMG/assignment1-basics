@@ -43,7 +43,7 @@ addopts = "-s"
 norecursedirs = [".git", ".venv", "outputs", "wandb"]
 
 [tool.ruff]
-line-length = 150
+line-length = 120
 
 [tool.ruff.format]
 skip-magic-trailing-comma = true

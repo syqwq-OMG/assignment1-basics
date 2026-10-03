@@ -4,6 +4,8 @@ from einops import einsum, rearrange
 from jaxtyping import Float, Bool
 from .operat0r import softmax
 from .linear import Linear
+from .rope import RoPE
+
 import math
 
 
@@ -28,11 +30,21 @@ def scaled_dot_product_attention(
 
 
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, d_out: int = 0, device: torch.device = None, dtype: torch.dtype = None):
-        """ 
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_out: int = 0,
+        rope: RoPE = None,
+        device: torch.device = None,
+        dtype: torch.dtype = None,
+    ):
+        """
         d_model: embedding dimension
         num_heads: number of attention heads
         d_out: output dimension, if 0, then d_out = d_model
+        rope: RoPE instance for rotary positional encoding
+        **default causal is True**
         """
         super().__init__()
         assert d_model % num_heads == 0, "[MultiHeadSelfAttention]: d_model must be divisible by num_heads"
@@ -43,18 +55,25 @@ class MultiHeadSelfAttention(nn.Module):
         self.num_heads = num_heads
         self.d_k = d_model // num_heads
         self.d_v = self.d_out // num_heads
+        self.rope = rope
 
         self.W_q = Linear(d_model, num_heads * self.d_k, device=device, dtype=dtype)
         self.W_k = Linear(d_model, num_heads * self.d_k, device=device, dtype=dtype)
         self.W_v = Linear(d_model, num_heads * self.d_v, device=device, dtype=dtype)
         self.W_o = Linear(num_heads * self.d_v, self.d_out, device=device, dtype=dtype)
 
-    def forward(self, x: Float[torch.Tensor, "batch_size seq_len d_model"], causal: bool = True) -> Float[torch.Tensor, "batch_size seq_len d_out"]:
+    def forward(
+        self, x: Float[torch.Tensor, "batch_size seq_len d_model"], causal: bool = True
+    ) -> Float[torch.Tensor, "batch_size seq_len d_out"]:
         seq_len = x.shape[-2]
 
         Q = rearrange(self.W_q(x), "b s (h d) -> b h s d", h=self.num_heads)
         K = rearrange(self.W_k(x), "b s (h d) -> b h s d", h=self.num_heads)
         V = rearrange(self.W_v(x), "b s (h d) -> b h s d", h=self.num_heads)
+
+        if self.rope is not None:
+            Q = self.rope(Q)
+            K = self.rope(K)
 
         mask = None
         if causal:

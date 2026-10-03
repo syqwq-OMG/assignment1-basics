@@ -19,7 +19,10 @@ from cs336_basics.Trans4mer.operat0r import silu, softmax
 from cs336_basics.Trans4mer.rope import RoPE
 from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 
-def run_linear(d_in: int, d_out: int, weights: Float[Tensor, " d_out d_in"], in_features: Float[Tensor, " ... d_in"]) -> Float[Tensor, " ... d_out"]:
+
+def run_linear(
+    d_in: int, d_out: int, weights: Float[Tensor, " d_out d_in"], in_features: Float[Tensor, " ... d_in"]
+) -> Float[Tensor, " ... d_out"]:
     """
     Given the weights of a Linear layer, compute the transformation of a batched input.
 
@@ -191,7 +194,13 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    pass
+    rope = RoPE(theta, d_model // num_heads, max_seq_len)
+    mha = MultiHeadSelfAttention(d_model, num_heads, rope=rope)
+    mha.W_q.weights.data = q_proj_weight
+    mha.W_k.weights.data = k_proj_weight
+    mha.W_v.weights.data = v_proj_weight
+    mha.W_o.weights.data = o_proj_weight
+    return mha(in_features)
 
 
 def run_rope(
@@ -408,7 +417,9 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
     return silu(in_features)
 
 
-def run_get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
+def run_get_batch(
+    dataset: npt.NDArray, batch_size: int, context_length: int, device: str
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Given a dataset (a 1D numpy array of integers) and a desired batch size and
     context length, sample language modeling input sequences and their corresponding
@@ -445,7 +456,9 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
     return softmax(in_features, dim=dim)
 
 
-def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
+def run_cross_entropy(
+    inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]
+) -> Float[Tensor, ""]:
     """Given a tensor of inputs and targets, compute the average cross-entropy
     loss across examples.
 
@@ -480,7 +493,9 @@ def get_adamw_cls() -> Any:
     raise NotImplementedError
 
 
-def run_get_lr_cosine_schedule(it: int, max_learning_rate: float, min_learning_rate: float, warmup_iters: int, cosine_cycle_iters: int):
+def run_get_lr_cosine_schedule(
+    it: int, max_learning_rate: float, min_learning_rate: float, warmup_iters: int, cosine_cycle_iters: int
+):
     """
     Given the parameters of a cosine learning rate decay schedule (with linear
     warmup) and an iteration number, return the learning rate at the given
@@ -502,7 +517,12 @@ def run_get_lr_cosine_schedule(it: int, max_learning_rate: float, min_learning_r
     raise NotImplementedError
 
 
-def run_save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer, iteration: int, out: str | os.PathLike | BinaryIO | IO[bytes]):
+def run_save_checkpoint(
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    iteration: int,
+    out: str | os.PathLike | BinaryIO | IO[bytes],
+):
     """
     Given a model, optimizer, and an iteration number, serialize them to disk.
 
@@ -516,7 +536,9 @@ def run_save_checkpoint(model: torch.nn.Module, optimizer: torch.optim.Optimizer
     raise NotImplementedError
 
 
-def run_load_checkpoint(src: str | os.PathLike | BinaryIO | IO[bytes], model: torch.nn.Module, optimizer: torch.optim.Optimizer) -> int:
+def run_load_checkpoint(
+    src: str | os.PathLike | BinaryIO | IO[bytes], model: torch.nn.Module, optimizer: torch.optim.Optimizer
+) -> int:
     """
     Given a serialized checkpoint (path or file-like object), restore the
     serialized state to the given model and optimizer.
@@ -533,7 +555,9 @@ def run_load_checkpoint(src: str | os.PathLike | BinaryIO | IO[bytes], model: to
     raise NotImplementedError
 
 
-def get_tokenizer(vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None) -> Any:
+def get_tokenizer(
+    vocab: dict[int, bytes], merges: list[tuple[bytes, bytes]], special_tokens: list[str] | None = None
+) -> Any:
     """Given a vocabulary, a list of merges, and a list of special tokens,
     return a BPE tokenizer that uses the provided vocab, merges, and special tokens.
 
