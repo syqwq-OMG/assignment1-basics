@@ -5,7 +5,7 @@
   set heading(numbering: "1.1")
   set page(numbering: "1")
 
-  show raw:set text(font:"Fira Code")
+  show raw:set text(font:"MesloLGM Nerd Font")
 
   align(center, title())
   align(center, text(size: 14pt)[#name #student_id\ #date])
