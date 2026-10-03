@@ -18,7 +18,7 @@ from cs336_basics.Trans4mer.swiglu import SwiGLU
 from cs336_basics.Trans4mer.operat0r import silu, softmax
 from cs336_basics.Trans4mer.rope import RoPE
 from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, MultiHeadSelfAttention
-from cs336_basics.Trans4mer.transformer import TransformerBlock
+from cs336_basics.Trans4mer.transformer import TransformerBlock, TransformerLM
 
 
 def run_linear(
@@ -396,7 +396,40 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    model = TransformerLM(
+        vocab_size=vocab_size,
+        d_model=d_model,
+        context_length=context_length,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        d_ff=d_ff,
+        rope_theta=rope_theta,
+    )
+
+    model_weights = {
+        "embedding.weights": weights["token_embeddings.weight"],
+        "norm.weights": weights["ln_final.weight"],
+        "linear.weights": weights["lm_head.weight"],
+    }
+    for layer_index in range(num_layers):
+        source_prefix = f"layers.{layer_index}"
+        target_prefix = f"layers.{layer_index}"
+        model_weights.update(
+            {
+                f"{target_prefix}.attention.W_q.weights": weights[f"{source_prefix}.attn.q_proj.weight"],
+                f"{target_prefix}.attention.W_k.weights": weights[f"{source_prefix}.attn.k_proj.weight"],
+                f"{target_prefix}.attention.W_v.weights": weights[f"{source_prefix}.attn.v_proj.weight"],
+                f"{target_prefix}.attention.W_o.weights": weights[f"{source_prefix}.attn.output_proj.weight"],
+                f"{target_prefix}.norm1.weights": weights[f"{source_prefix}.ln1.weight"],
+                f"{target_prefix}.ffn.w1.weights": weights[f"{source_prefix}.ffn.w1.weight"],
+                f"{target_prefix}.ffn.w2.weights": weights[f"{source_prefix}.ffn.w2.weight"],
+                f"{target_prefix}.ffn.w3.weights": weights[f"{source_prefix}.ffn.w3.weight"],
+                f"{target_prefix}.norm2.weights": weights[f"{source_prefix}.ln2.weight"],
+            }
+        )
+
+    model.load_state_dict(model_weights, strict=True)
+    return model(in_indices)
 
 
 def run_rmsnorm(
