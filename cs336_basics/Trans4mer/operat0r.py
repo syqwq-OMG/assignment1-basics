@@ -23,3 +23,17 @@ def silu(x: torch.Tensor) -> torch.Tensor:
         torch.Tensor: SiLU of the input tensor.
     """
     return x * sigmoid(x)
+
+def softmax(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
+    """
+    Compute the softmax of x along the specified dimension.
+
+    Args:
+        x (torch.Tensor): Input tensor.
+        dim (int): Dimension along which to compute the softmax. Default is -1.
+
+    Returns:
+        torch.Tensor: Softmax of the input tensor along the specified dimension.
+    """
+    exp_x = torch.exp(x - torch.max(x, dim=dim, keepdim=True).values)
+    return exp_x / torch.sum(exp_x, dim=dim, keepdim=True)

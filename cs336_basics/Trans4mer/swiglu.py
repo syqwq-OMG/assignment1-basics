@@ -11,10 +11,10 @@ class SwiGLU(nn.Module):
     FFN(x) = W2 * (SiLU(W1 * x) * W3 * x)
     """
 
-    def __init__(self, d_model: int, d_ff: int = None):
+    def __init__(self, d_model: int, d_ff: int = 0):
         super().__init__()
         self.d_model = d_model
-        self.d_ff = d_ff if d_ff is not None else (int(8 * d_model / 3) // 64 + 1) * 64
+        self.d_ff = d_ff if d_ff != 0 else (int(8 * d_model / 3) // 64 + 1) * 64
         self.w1 = Linear(d_model, d_ff)
         self.w2 = Linear(d_ff, d_model)
         self.w3 = Linear(d_model, d_ff)

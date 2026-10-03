@@ -15,6 +15,8 @@ from cs336_basics.Trans4mer.embedding import Embedding
 from cs336_basics.Trans4mer.linear import Linear
 from cs336_basics.Trans4mer.rmsnorm import RMSNorm
 from cs336_basics.Trans4mer.swiglu import SwiGLU
+from cs336_basics.Trans4mer.operat0r import silu, softmax
+from cs336_basics.Trans4mer.rope import RoPE
 
 def run_linear(d_in: int, d_out: int, weights: Float[Tensor, " d_out d_in"], in_features: Float[Tensor, " ... d_in"]) -> Float[Tensor, " ... d_out"]:
     """
@@ -205,7 +207,8 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
-    raise NotImplementedError
+    rope = RoPE(theta, d_k, max_seq_len)
+    return rope(in_query_or_key, token_positions)
 
 
 def run_transformer_block(
@@ -396,7 +399,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    raise NotImplementedError
+    return silu(in_features)
 
 
 def run_get_batch(dataset: npt.NDArray, batch_size: int, context_length: int, device: str) -> tuple[torch.Tensor, torch.Tensor]:
@@ -433,7 +436,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    raise NotImplementedError
+    return softmax(in_features, dim=dim)
 
 
 def run_cross_entropy(inputs: Float[Tensor, " batch_size vocab_size"], targets: Int[Tensor, " batch_size"]) -> Float[Tensor, ""]:
