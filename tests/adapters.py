@@ -17,7 +17,7 @@ from cs336_basics.Trans4mer.rmsnorm import RMSNorm
 from cs336_basics.Trans4mer.swiglu import SwiGLU
 from cs336_basics.Trans4mer.operat0r import silu, softmax
 from cs336_basics.Trans4mer.rope import RoPE
-from cs336_basics.Trans4mer.attention import scaled_dot_product_attention
+from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 
 def run_linear(d_in: int, d_out: int, weights: Float[Tensor, " d_out d_in"], in_features: Float[Tensor, " ... d_in"]) -> Float[Tensor, " ... d_out"]:
     """
@@ -146,7 +146,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mha = MultiHeadSelfAttention(d_model, num_heads)
+    mha.W_q.weights.data = q_proj_weight
+    mha.W_k.weights.data = k_proj_weight
+    mha.W_v.weights.data = v_proj_weight
+    mha.W_o.weights.data = o_proj_weight
+    return mha(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -186,7 +191,7 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_model"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    pass
 
 
 def run_rope(

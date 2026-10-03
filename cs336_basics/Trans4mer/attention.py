@@ -1,8 +1,9 @@
 import torch
 from torch import nn
-from einops import einsum
+from einops import einsum, rearrange
 from jaxtyping import Float, Bool
 from .operat0r import softmax
+from .linear import Linear
 import math
 
 
@@ -10,19 +11,10 @@ def scaled_dot_product_attention(
     query: Float[torch.Tensor, "batch_size ... seq_len d_k"],
     key: Float[torch.Tensor, "batch_size ... seq_len d_k"],
     value: Float[torch.Tensor, "batch_size ... seq_len d_v"],
-    mask: Bool[torch.Tensor, "batch_size ... seq_len seq_len"] = None,
+    mask: Bool[torch.Tensor, "... seq_len seq_len"] = None,
 ) -> Float[torch.Tensor, "batch_size ... seq_len d_v"]:
     """
-    Compute the scaled dot-product attention.
-
-    Args:
-        query: Float[Tensor, "batch_size, ..., seq_len, d_k"]: The query tensor.
-        key: Float[Tensor, "batch_size, ..., seq_len, d_k"]: The key tensor.
-        value: Float[Tensor, "batch_size, ..., seq_len, d_v"]: The value tensor.
-        mask: Bool[Tensor, "batch_size, ..., seq_len, seq_len"]: Optional mask tensor.
-
-    Returns:
-        softmax(QK^T / sqrt(d_k)) V with mask
+    softmax(QK^T / sqrt(d_k)) V with mask
     """
 
     d_k = query.shape[-1]
@@ -33,3 +25,41 @@ def scaled_dot_product_attention(
 
     attn_weights = softmax(scores, dim=-1)
     return attn_weights @ value
+
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_out: int = 0, device: torch.device = None, dtype: torch.dtype = None):
+        """ 
+        d_model: embedding dimension
+        num_heads: number of attention heads
+        d_out: output dimension, if 0, then d_out = d_model
+        """
+        super().__init__()
+        assert d_model % num_heads == 0, "[MultiHeadSelfAttention]: d_model must be divisible by num_heads"
+        assert d_out % num_heads == 0, "[MultiHeadSelfAttention]: d_out must be divisible by num_heads"
+
+        self.d_model = d_model
+        self.d_out = d_out if d_out != 0 else d_model
+        self.num_heads = num_heads
+        self.d_k = d_model // num_heads
+        self.d_v = self.d_out // num_heads
+
+        self.W_q = Linear(d_model, num_heads * self.d_k, device=device, dtype=dtype)
+        self.W_k = Linear(d_model, num_heads * self.d_k, device=device, dtype=dtype)
+        self.W_v = Linear(d_model, num_heads * self.d_v, device=device, dtype=dtype)
+        self.W_o = Linear(num_heads * self.d_v, self.d_out, device=device, dtype=dtype)
+
+    def forward(self, x: Float[torch.Tensor, "batch_size seq_len d_model"], causal: bool = True) -> Float[torch.Tensor, "batch_size seq_len d_out"]:
+        seq_len = x.shape[-2]
+
+        Q = rearrange(self.W_q(x), "b s (h d) -> b h s d", h=self.num_heads)
+        K = rearrange(self.W_k(x), "b s (h d) -> b h s d", h=self.num_heads)
+        V = rearrange(self.W_v(x), "b s (h d) -> b h s d", h=self.num_heads)
+
+        mask = None
+        if causal:
+            mask = torch.tril(torch.ones((seq_len, seq_len), device=x.device, dtype=torch.bool))
+
+        attn = scaled_dot_product_attention(Q, K, V, mask)
+        attn = rearrange(attn, "b h s d -> b s (h d)")
+        return self.W_o(attn)
