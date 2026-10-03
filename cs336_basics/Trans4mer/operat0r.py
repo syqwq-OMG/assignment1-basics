@@ -37,3 +37,14 @@ def softmax(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     """
     exp_x = torch.exp(x - torch.max(x, dim=dim, keepdim=True).values)
     return exp_x / torch.sum(exp_x, dim=dim, keepdim=True)
+
+def cross_entropy_loss(inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the cross-entropy loss between logits and targets.
+    """
+    probs = softmax(inputs, dim=-1)
+    correct_probs = probs.gather(
+        dim=-1, index=targets.unsqueeze(-1)
+    )
+    loss = -torch.log(correct_probs)
+    return loss.mean()
