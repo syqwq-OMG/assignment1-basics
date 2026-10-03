@@ -17,6 +17,7 @@ from cs336_basics.Trans4mer.rmsnorm import RMSNorm
 from cs336_basics.Trans4mer.swiglu import SwiGLU
 from cs336_basics.Trans4mer.operat0r import silu, softmax
 from cs336_basics.Trans4mer.rope import RoPE
+from cs336_basics.Trans4mer.attention import scaled_dot_product_attention
 
 def run_linear(d_in: int, d_out: int, weights: Float[Tensor, " d_out d_in"], in_features: Float[Tensor, " ... d_in"]) -> Float[Tensor, " ... d_out"]:
     """
@@ -111,7 +112,7 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    return scaled_dot_product_attention(Q, K, V, mask)
 
 
 def run_multihead_self_attention(

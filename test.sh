@@ -6,6 +6,7 @@ uv run pytest -k "linear \
     or rmsnorm \
     or silu or swiglu \
     or softmax \
-    or test_rope" 
+    or test_rope \
+    or test_scaled_dot_product_attention" 
 
 # uv run python -m cs336_basics.BPE.bpe
