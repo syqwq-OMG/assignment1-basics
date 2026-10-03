@@ -19,5 +19,5 @@ class SwiGLU(nn.Module):
         self.w2 = Linear(d_ff, d_model)
         self.w3 = Linear(d_model, d_ff)
 
-    def forward(self, x: Float[torch.Tensor, "batch_size seq_len d_model"]) -> Float[torch.Tensor, "batch_size seq_len d_model"]:
+    def forward(self, x: Float[torch.Tensor, "... seq_len d_model"]) -> Float[torch.Tensor, "... seq_len d_model"]:
         return self.w2(silu(self.w1(x)) * self.w3(x))

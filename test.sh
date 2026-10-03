@@ -8,6 +8,7 @@ uv run pytest -k "linear \
     or softmax \
     or test_rope \
     or test_scaled_dot_product_attention \
-    or test_multihead_self_attention" 
+    or test_multihead_self_attention \
+    or run_transformer_block" 
 
 # uv run python -m cs336_basics.BPE.bpe

@@ -18,6 +18,7 @@ from cs336_basics.Trans4mer.swiglu import SwiGLU
 from cs336_basics.Trans4mer.operat0r import silu, softmax
 from cs336_basics.Trans4mer.rope import RoPE
 from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, MultiHeadSelfAttention
+from cs336_basics.Trans4mer.transformer import TransformerBlock
 
 
 def run_linear(
@@ -296,7 +297,24 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    rope = RoPE(theta, d_model // num_heads, max_seq_len)
+    transformer_block = TransformerBlock(d_model, num_heads, d_ff, rope=rope)
+
+    transformer_block.load_state_dict(
+        {
+            "attention.W_q.weights": weights["attn.q_proj.weight"],
+            "attention.W_k.weights": weights["attn.k_proj.weight"],
+            "attention.W_v.weights": weights["attn.v_proj.weight"],
+            "attention.W_o.weights": weights["attn.output_proj.weight"],
+            "norm1.weights": weights["ln1.weight"],
+            "ffn.w1.weights": weights["ffn.w1.weight"],
+            "ffn.w2.weights": weights["ffn.w2.weight"],
+            "ffn.w3.weights": weights["ffn.w3.weight"],
+            "norm2.weights": weights["ln2.weight"],
+        },
+        strict=True,
+    )
+    return transformer_block(in_features)
 
 
 def run_transformer_lm(
