@@ -12,6 +12,8 @@ uv run pytest -k "linear \
     or test_transformer_block \
     or test_transformer_lm \
     or test_cross_entropy\
-    or test_adamw" 
+    or test_adamw \
+    or cosine_schedule \
+    or gradient_clipping " 
 
 # uv run python -m cs336_basics.BPE.bpe

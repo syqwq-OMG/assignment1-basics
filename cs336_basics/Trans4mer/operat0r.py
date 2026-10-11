@@ -51,3 +51,12 @@ def cross_entropy_loss(inputs: torch.Tensor, targets: torch.Tensor) -> torch.Ten
         -1, targets.unsqueeze(-1)
     ).squeeze(-1)
     return torch.mean(t)
+
+
+def gradient_clipping(params, max_norm: float):
+    grads = [p.grad for p in params if p.grad is not None]
+    total_norm = torch.sqrt(sum(torch.sum(g**2) for g in grads))
+    if total_norm > max_norm:
+        scale = max_norm / (total_norm + 1e-6)
+        for g in grads:
+            g.mul_(scale)

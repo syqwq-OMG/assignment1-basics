@@ -15,11 +15,11 @@ from cs336_basics.Trans4mer.embedding import Embedding
 from cs336_basics.Trans4mer.linear import Linear
 from cs336_basics.Trans4mer.rmsnorm import RMSNorm
 from cs336_basics.Trans4mer.swiglu import SwiGLU
-from cs336_basics.Trans4mer.operat0r import silu, softmax, cross_entropy_loss
+from cs336_basics.Trans4mer.operat0r import silu, softmax, cross_entropy_loss, gradient_clipping
 from cs336_basics.Trans4mer.rope import RoPE
 from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 from cs336_basics.Trans4mer.transformer import TransformerBlock, TransformerLM
-from cs336_basics.Trans4mer.optim1zer import AdamW
+from cs336_basics.Trans4mer.optim1zer import AdamW, learning_rate_schedule
 
 
 def run_linear(
@@ -535,7 +535,7 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    gradient_clipping(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> Any:
@@ -566,7 +566,7 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+    return learning_rate_schedule(it, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters)
 
 
 def run_save_checkpoint(

@@ -3,6 +3,13 @@ from typing import Optional
 import torch
 import math
 
+def learning_rate_schedule(t:int, a_max, a_min, T_w, T_c):
+    if t < T_w:
+        return a_max * t / T_w
+    elif t < T_c:
+        return a_min + (1+math.cos(math.pi * (t - T_w) / (T_c - T_w))) * (a_max - a_min) / 2
+    else:
+        return a_min
 
 class SGD(torch.optim.Optimizer):
     def __init__(self, params, lr=1e-3):
