@@ -20,6 +20,7 @@ from cs336_basics.Trans4mer.rope import RoPE
 from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 from cs336_basics.Trans4mer.transformer import TransformerBlock, TransformerLM
 from cs336_basics.Trans4mer.optim1zer import AdamW, learning_rate_schedule
+from cs336_basics.Trans4mer.data import get_batch
 
 
 def run_linear(
@@ -489,7 +490,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:

@@ -14,6 +14,7 @@ uv run pytest -k "linear \
     or test_cross_entropy\
     or test_adamw \
     or cosine_schedule \
-    or gradient_clipping " 
+    or gradient_clipping \
+    or get_batch" 
 
 # uv run python -m cs336_basics.BPE.bpe
