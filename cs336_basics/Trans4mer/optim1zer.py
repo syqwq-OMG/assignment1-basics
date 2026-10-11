@@ -39,7 +39,53 @@ class AdamW(torch.optim.Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps, lam=weight_decay)
         super().__init__(params, defaults)
 
+    @torch.no_grad()
     def step(self, closure: Optional[Callable] = None):
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
+
+        for group in self.param_groups:
+            lr, eps, lam = group["lr"], group["eps"], group["lam"]
+            beta1, beta2 = group["betas"]
+
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                state = self.state[p]
+
+                if "m" not in state:
+                    state["m"] = torch.zeros_like(p)
+                    state["v"] = torch.zeros_like(p)
+                    state["t"] = 0
+
+                t = state["t"] + 1
+                m = state["m"]
+                v = state["v"]
+                grad = p.grad
+
+                # Adjusted learning rate
+                a_t = lr * math.sqrt(1 - beta2**t) / (1 - beta1**t)
+
+                # Decoupled weight decay
+                p.mul_(1 - lr * lam)
+
+                # First moment
+                m.mul_(beta1).add_(grad, alpha=1 - beta1)
+
+                # Second moment
+                v.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
+
+                # Parameter update
+                p.addcdiv_(m, v.sqrt().add(eps), value=-a_t)
+
+                state["t"] = t
+
+        return loss
+
+    def my_step(self, closure: Optional[Callable] = None):
         loss = None if closure is None else closure()
         for group in self.param_groups:
             lr, eps, lam = group["lr"], group["eps"], group["lam"]
@@ -50,14 +96,14 @@ class AdamW(torch.optim.Optimizer):
                     continue
 
                 state = self.state[p]
-                
+
                 t = state.get("t", 0)
                 grad = p.grad.data
-                m=state.get("m", torch.zeros_like(p.data))
-                v=state.get("v", torch.zeros_like(p.data))
-                
+                m = state.get("m", torch.zeros_like(p.data))
+                v = state.get("v", torch.zeros_like(p.data))
+
                 a_t = lr * math.sqrt(1 - beta2 ** (t + 1)) / (1 - beta1 ** (t + 1))
-                p.data -= lr*lam*p.data
+                p.data -= lr * lam * p.data
                 m = beta1 * m + (1 - beta1) * grad
                 v = beta2 * v + (1 - beta2) * grad * grad
                 p.data -= a_t * m / (torch.sqrt(v) + eps)
