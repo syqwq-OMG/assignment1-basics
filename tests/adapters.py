@@ -21,6 +21,7 @@ from cs336_basics.Trans4mer.attention import scaled_dot_product_attention, Multi
 from cs336_basics.Trans4mer.transformer import TransformerBlock, TransformerLM
 from cs336_basics.Trans4mer.optim1zer import AdamW, learning_rate_schedule
 from cs336_basics.Trans4mer.data import get_batch
+from cs336_basics.Trans4mer.checkpoint import load_checkpoint, save_checkpoint
 
 
 def run_linear(
@@ -586,7 +587,7 @@ def run_save_checkpoint(
             we've completed.
         out (str | os.PathLike | BinaryIO | IO[bytes]): Path or file-like object to serialize the model, optimizer, and iteration to.
     """
-    raise NotImplementedError
+    save_checkpoint(model, optimizer, iteration, out)
 
 
 def run_load_checkpoint(
@@ -605,7 +606,7 @@ def run_load_checkpoint(
     Returns:
         int: the previously-serialized number of iterations.
     """
-    raise NotImplementedError
+    return load_checkpoint(src, model, optimizer)
 
 
 def get_tokenizer(
