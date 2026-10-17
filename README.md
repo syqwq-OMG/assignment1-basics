@@ -8,6 +8,8 @@ raise a GitHub issue or open a pull request with a fix.
 
 ## Setup
 
+课程服务器训练（公共环境、OWT、W&B、最终评分与续训）见 [SERVER_TRAINING.md](./SERVER_TRAINING.md)。
+
 ### Environment
 We manage our environments with `uv` to ensure reproducibility, portability, and ease of use.
 Install `uv` [here](https://github.com/astral-sh/uv#installation) (recommended), or run `pip install uv`/`brew install uv`.
@@ -49,4 +51,4 @@ cd ..
 ```
 
 ## maybe
-+ [bpe.py](./cs336_basics/BPE/bpe.py) may be use multi-thred to deal with the chunked data? and hope use incremental update to avoid re-computing the whole data. 
++ [bpe.py](./cs336_basics/BPE/bpe.py) may be use multi-thred to deal with the chunked data? and hope use incremental update to avoid re-computing the whole data.

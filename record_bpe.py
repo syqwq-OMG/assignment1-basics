@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import time
 
@@ -16,14 +17,9 @@ DEFAULT_SPECIAL_TOKEN = "<|endoftext|>"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Train the BPE tokenizer and record the experiment in W&B."
-    )
+    parser = argparse.ArgumentParser(description="Train the BPE tokenizer and record the experiment in W&B.")
     parser.add_argument(
-        "--input-path",
-        type=Path,
-        default=DEFAULT_INPUT,
-        help=f"Training corpus (default: {DEFAULT_INPUT})",
+        "--input-path", type=Path, default=DEFAULT_INPUT, help=f"Training corpus (default: {DEFAULT_INPUT})"
     )
     parser.add_argument(
         "--vocab-size",
@@ -36,8 +32,7 @@ def parse_args() -> argparse.Namespace:
         action="append",
         dest="special_tokens",
         help=(
-            "Special token to reserve. Repeat this option for multiple tokens. "
-            f"Defaults to {DEFAULT_SPECIAL_TOKEN!r}."
+            f"Special token to reserve. Repeat this option for multiple tokens. Defaults to {DEFAULT_SPECIAL_TOKEN!r}."
         ),
     )
     parser.add_argument(
@@ -49,6 +44,7 @@ def parse_args() -> argparse.Namespace:
             "BPE.train selects its size-aware default strategy."
         ),
     )
+    parser.add_argument("--valid-path", type=Path, help="Complete validation text for the official BPE score.")
     return parser.parse_args()
 
 
@@ -59,29 +55,26 @@ def main() -> None:
 
     if not input_path.is_file():
         raise FileNotFoundError(f"Training corpus does not exist: {input_path}")
+    if args.valid_path is not None and not args.valid_path.is_file():
+        raise FileNotFoundError(f"Validation corpus does not exist: {args.valid_path}")
+    if not 256 + len(special_tokens) <= args.vocab_size <= 32_000:
+        raise ValueError("Vocabulary must contain all bytes and special tokens and be at most 32000.")
 
     config = {
         "input_path": str(input_path),
+        "valid_file": str(args.valid_path.resolve()) if args.valid_path else None,
         "input_size_bytes": input_path.stat().st_size,
         "vocab_size": args.vocab_size,
         "special_tokens": special_tokens,
         "num_threads": args.num_threads,
-        "parallel_strategy": (
-            f"threads:{args.num_threads}"
-            if args.num_threads is not None
-            else "automatic"
-        ),
+        "parallel_strategy": (f"threads:{args.num_threads}" if args.num_threads is not None else "automatic"),
     }
 
     with experiment("train-bpe", config, root=PROJECT_ROOT) as run:
         tokenizer = BPE(special_tokens=special_tokens)
 
         started_at = time.perf_counter()
-        tokenizer.train(
-            input_path=input_path,
-            vocab_size=args.vocab_size,
-            num_threads=args.num_threads,
-        )
+        tokenizer.train(input_path=input_path, vocab_size=args.vocab_size, num_threads=args.num_threads)
         train_seconds = time.perf_counter() - started_at
 
         vocab = tokenizer.get_vocab()
@@ -93,9 +86,7 @@ def main() -> None:
             "bpe/input_size_bytes": input_path.stat().st_size,
             "bpe/actual_vocab_size": actual_vocab_size,
             "bpe/num_merges": len(merges),
-            "bpe/throughput_mib_per_second": (
-                input_path.stat().st_size / (1024**2) / train_seconds
-            ),
+            "bpe/throughput_mib_per_second": (input_path.stat().st_size / (1024**2) / train_seconds),
         }
         run.log(metrics)
         run.summary.update(metrics)
@@ -120,11 +111,80 @@ def main() -> None:
             tokenizer_artifact.add_file(str(path), name=path.name)
         run.log_artifact(tokenizer_artifact)
 
+        if args.valid_path is not None:
+            # The scored interval starts with a freshly loaded, cold tokenizer.
+            tokenizer = BPE()
+            tokenizer.load(str(output_prefix))
+            with args.valid_path.open(encoding="utf-8", newline="") as handle:
+                text = handle.read()
+            started_at = time.perf_counter()
+            ids = tokenizer.encode(text)
+            decoded = tokenizer.decode(ids)
+            passed = decoded == text
+            valid_seconds = time.perf_counter() - started_at
+
+            raw = text.encode("utf-8")
+            first_ids = ids[:200]
+            rows, offset = [], 0
+            for position, token_id in enumerate(first_ids):
+                piece = tokenizer.get_vocab()[token_id]
+                end = offset + len(piece)
+                try:
+                    piece.decode("utf-8", errors="strict")
+                    standalone_valid = True
+                except UnicodeDecodeError:
+                    standalone_valid = False
+                rows.append(
+                    [
+                        position,
+                        int(token_id),
+                        piece.hex(),
+                        repr(piece),
+                        repr(tokenizer.decode([token_id])),
+                        standalone_valid,
+                        offset,
+                        end,
+                        piece == raw[offset:end],
+                    ]
+                )
+                offset = end
+            columns = [
+                "position",
+                "token_id",
+                "token_hex",
+                "token_bytes",
+                "decoded_token",
+                "standalone_utf8_valid",
+                "byte_start",
+                "byte_end",
+                "matches_input_bytes",
+            ]
+            result = {
+                "bpe/valid_seconds": valid_seconds,
+                "bpe/valid_token_count": len(ids),
+                "bpe/roundtrip_passed": passed,
+                "bpe/vocab_size": actual_vocab_size,
+            }
+            print("First 200 token IDs:", first_ids, flush=True)
+            print("First 200 tokens decoded:", repr(tokenizer.decode(first_ids)), flush=True)
+            print("Token columns:", columns, flush=True)
+            for row in rows:
+                print(row, flush=True)
+            run.log({"bpe/first_200_tokens": wandb.Table(columns=columns, data=rows)})
+            run.summary.update(result)
+            result_path = output_dir / "result.json"
+            result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            run.save(str(result_path), base_path=str(output_dir), policy="now")
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+            if len(ids) < 200 or not passed:
+                raise ValueError("Validation must contain at least 200 tokens and roundtrip exactly.")
+
         print(
             f"BPE training complete: {actual_vocab_size} vocabulary entries, "
             f"{len(merges)} merges, {train_seconds:.2f} seconds."
         )
         print(f"Tokenizer files: {output_dir}")
+        print(f"Transformer --tokenizer-prefix {output_prefix}")
         print(f"W&B run: {run.url}")
 
 

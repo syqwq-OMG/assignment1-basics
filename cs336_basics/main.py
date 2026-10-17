@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import sys
 import time
@@ -156,7 +157,47 @@ def estimate_loss(
     return total_loss / eval_iters
 
 
-def train(args: argparse.Namespace) -> None:
+@torch.inference_mode()
+def evaluate_full(model, dataset, batch_size, context_length, device):
+    """Score every next-token target once, in consecutive context-length blocks.
+
+    Context resets at block boundaries. The last partial block is included;
+    no padding or extra BOS/EOS tokens are introduced.
+    """
+    model.eval()
+    total_nll = torch.zeros((), dtype=torch.float64, device=device)
+    token_count = 0
+    full_blocks = (len(dataset) - 1) // context_length
+    try:
+        for first in range(0, full_blocks, batch_size):
+            count = min(batch_size, full_blocks - first)
+            start = first * context_length
+            size = count * context_length
+            inputs = torch.tensor(np.array(dataset[start : start + size]), dtype=torch.long, device=device)
+            targets = torch.tensor(np.array(dataset[start + 1 : start + size + 1]), dtype=torch.long, device=device)
+            loss = language_model_loss(
+                model(inputs.reshape(count, context_length)), targets.reshape(count, context_length)
+            )
+            total_nll.add_(loss.double() * size)
+            token_count += size
+        start = full_blocks * context_length
+        if start < len(dataset) - 1:
+            inputs = torch.tensor(np.array(dataset[start:-1]), dtype=torch.long, device=device).unsqueeze(0)
+            targets = torch.tensor(np.array(dataset[start + 1 :]), dtype=torch.long, device=device).unsqueeze(0)
+            total_nll.add_(language_model_loss(model(inputs), targets).double() * targets.numel())
+            token_count += targets.numel()
+        return float(total_nll.item()), token_count
+    finally:
+        model.train()
+
+
+def atomic_checkpoint(model, optimizer, iteration, path):
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    save_checkpoint(model, optimizer, iteration, temporary)
+    temporary.replace(path)
+
+
+def train(args: argparse.Namespace, run=None, stop_training_clock: float | None = None) -> dict:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -192,8 +233,9 @@ def train(args: argparse.Namespace) -> None:
     args.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     model.train()
     started_at = time.perf_counter()
-    running_loss = 0.0
+    running_loss = torch.zeros((), dtype=torch.float64, device=device)
     running_steps = 0
+    completed_iterations = start_iteration
 
     print(
         f"device={device} parameters={sum(parameter.numel() for parameter in model.parameters()):,} "
@@ -201,6 +243,9 @@ def train(args: argparse.Namespace) -> None:
     )
 
     for iteration in range(start_iteration, args.max_iters):
+        if stop_training_clock is not None and time.perf_counter() >= stop_training_clock:
+            print("Training stopped to reserve time for the last checkpoint and complete validation.", flush=True)
+            break
         lr = learning_rate_schedule(iteration, args.max_lr, args.min_lr, args.warmup_iters, args.cosine_cycle_iters)
         for group in optimizer.param_groups:
             group["lr"] = lr
@@ -213,17 +258,30 @@ def train(args: argparse.Namespace) -> None:
         optimizer.step()
 
         completed_iterations = iteration + 1
-        running_loss += loss.item()
+        running_loss.add_(loss.detach().double())
         running_steps += 1
 
         if completed_iterations % args.log_interval == 0 or completed_iterations == args.max_iters:
             elapsed = time.perf_counter() - started_at
             tokens_seen = completed_iterations * args.batch_size * args.context_length
+            mean_loss = running_loss.item() / running_steps
+            if not math.isfinite(mean_loss):
+                raise ValueError("Non-finite training loss; refusing to report an invalid score.")
             print(
-                f"iter={completed_iterations}/{args.max_iters} train_loss={running_loss / running_steps:.4f} "
+                f"iter={completed_iterations}/{args.max_iters} train_loss={mean_loss:.4f} "
                 f"lr={lr:.6g} tokens={tokens_seen:,} elapsed={elapsed:.1f}s"
             )
-            running_loss = 0.0
+            if run is not None:
+                run.log(
+                    {
+                        "train/ppl": math.exp(mean_loss),
+                        "train/step": completed_iterations,
+                        "time/elapsed_seconds": getattr(args, "previous_elapsed_seconds", 0.0)
+                        + time.perf_counter()
+                        - getattr(args, "program_started_clock", started_at),
+                    }
+                )
+            running_loss.zero_()
             running_steps = 0
 
         if completed_iterations % args.eval_interval == 0 or completed_iterations == args.max_iters:
@@ -232,8 +290,25 @@ def train(args: argparse.Namespace) -> None:
             print(f"iter={completed_iterations}/{args.max_iters} val_loss={val_loss:.4f} elapsed={elapsed:.1f}s")
 
         if completed_iterations % args.checkpoint_interval == 0 or completed_iterations == args.max_iters:
-            save_checkpoint(model, optimizer, completed_iterations, args.checkpoint_path)
+            atomic_checkpoint(model, optimizer, completed_iterations, args.checkpoint_path)
             print(f"checkpoint={args.checkpoint_path} iteration={completed_iterations}")
+
+    if running_steps and run is not None:
+        run.log(
+            {
+                "train/ppl": math.exp(running_loss.item() / running_steps),
+                "train/step": completed_iterations,
+                "time/elapsed_seconds": getattr(args, "previous_elapsed_seconds", 0.0)
+                + time.perf_counter()
+                - getattr(args, "program_started_clock", started_at),
+            }
+        )
+    # The scored model is the last saved model, followed by full validation.
+    atomic_checkpoint(model, optimizer, completed_iterations, args.checkpoint_path)
+    val_nll_sum, val_token_count = evaluate_full(model, val_data, args.batch_size, args.context_length, device)
+    if device.type == "cuda":
+        torch.cuda.synchronize(device)
+    return {"val_nll_sum": val_nll_sum, "val_token_count": val_token_count, "step": completed_iterations}
 
 
 def parse_decode_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

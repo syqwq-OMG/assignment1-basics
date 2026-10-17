@@ -47,7 +47,7 @@ def cross_entropy_loss(inputs: torch.Tensor, targets: torch.Tensor) -> torch.Ten
     Compute the cross-entropy loss between logits and targets.
     """
     inputs = inputs - torch.max(inputs, dim=-1, keepdim=True).values
-    t = torch.log(torch.sum(torch.exp(inputs), dim=-1, keepdim=True)) - inputs.gather(
+    t = torch.log(torch.sum(torch.exp(inputs), dim=-1)) - inputs.gather(
         -1, targets.unsqueeze(-1)
     ).squeeze(-1)
     return torch.mean(t)

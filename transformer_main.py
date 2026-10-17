@@ -1,0 +1,219 @@
+from __future__ import annotations
+
+# ruff: noqa: E402 -- course timing must start before importing ML dependencies.
+import time
+
+PROGRAM_STARTED_UNIX = time.time()
+PROGRAM_STARTED_CLOCK = time.perf_counter()
+
+import argparse
+import hashlib
+import json
+import math
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+import numpy as np
+
+from cs336_basics.BPE.bpe import BPE
+from cs336_basics.main import parse_args as parse_training_args, train
+from wandb_record import experiment
+
+ROOT = Path(__file__).resolve().parent
+
+
+def encode_file(tokenizer, source, destination, deadline_clock, chunk_size=1024 * 1024):
+    """Stream at reserved document boundaries, preserving whitespace and markers.
+
+    Arbitrary reads are retained until a complete <|endoftext|> boundary;
+    without that reserved marker, use a single encode call for correctness.
+    """
+    marker = "<|endoftext|>"
+    split_documents = marker in tokenizer.get_special_tokens()
+    dtype = np.dtype("uint16" if len(tokenizer.get_vocab()) <= 65_536 else "uint32")
+    count = 0
+    temporary = destination.with_suffix(".tmp")
+    with source.open(encoding="utf-8", newline="") as reader, temporary.open("wb") as writer:
+        pending = ""
+        while chunk := reader.read(chunk_size):
+            if time.perf_counter() >= deadline_clock:
+                raise TimeoutError("Budget reserve reached while encoding data; no training started.")
+            pending += chunk
+            if split_documents and marker in pending:
+                end = pending.rfind(marker) + len(marker)
+                ids = tokenizer.encode(pending[:end])
+                np.asarray(ids, dtype=dtype).tofile(writer)
+                count += len(ids)
+                pending = pending[end:]
+        if pending:
+            ids = tokenizer.encode(pending)
+            np.asarray(ids, dtype=dtype).tofile(writer)
+            count += len(ids)
+    temporary.replace(destination)
+    return dtype.name, count
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Official OWT Transformer run with source snapshots, W&B, full validation and timing.",
+        epilog="Additional model/training flags are forwarded to cs336_basics.main (python -m cs336_basics.main --help).",
+    )
+    parser.add_argument("--tokenizer-prefix", type=Path, required=True)
+    parser.add_argument("--train-text", type=Path, default=Path("/data/assignment1-data/owt_train.txt"))
+    parser.add_argument("--val-text", type=Path, default=Path("/data/assignment1-data/owt_valid.txt"))
+    parser.add_argument("--previous-timing", type=Path, help="Previous run's result.json; required with --resume.")
+    parser.add_argument("--max-train-seconds", type=float, default=21_600)
+    parser.add_argument("--finalize-reserve-seconds", type=float, default=1_800)
+    options, forwarded = parser.parse_known_args(argv)
+    if not math.isfinite(options.max_train_seconds) or not 0 < options.max_train_seconds <= 21_600:
+        parser.error("--max-train-seconds must be in (0, 21600]")
+    if (
+        not math.isfinite(options.finalize_reserve_seconds)
+        or not 0 < options.finalize_reserve_seconds < options.max_train_seconds
+    ):
+        parser.error("--finalize-reserve-seconds must be positive and below the total budget")
+    for path in (options.train_text, options.val_text):
+        if not path.is_file():
+            parser.error(f"Text corpus does not exist: {path}")
+
+    tokenizer = BPE()
+    tokenizer.load(str(options.tokenizer_prefix))
+    vocab = tokenizer.get_vocab()
+    if sorted(vocab) != list(range(len(vocab))):
+        parser.error("Tokenizer IDs must be contiguous starting at zero")
+    if len(vocab) > 32_000:
+        parser.error("Official vocabulary limit is 32000, including special tokens")
+    tokenizer_hashes = {
+        suffix: hashlib.sha256(Path(f"{options.tokenizer_prefix}.{suffix}.json").read_bytes()).hexdigest()
+        for suffix in ("vocab", "merges", "special_tokens")
+    }
+    # These temporary argument values are replaced with this run's private outputs.
+    args = parse_training_args(
+        [
+            "--train-data",
+            str(options.train_text),
+            "--val-data",
+            str(options.val_text),
+            "--vocab-size",
+            str(len(vocab)),
+            "--checkpoint-path",
+            str(ROOT / "outputs" / "last.pt"),
+            "--log-interval",
+            "100",
+            *forwarded,
+        ]
+    )
+    if args.log_interval != 100:
+        parser.error("Official training PPL is logged every 100 optimizer updates")
+    if args.vocab_size != len(vocab):
+        parser.error("--vocab-size must match the actual saved BPE vocabulary")
+    previous = 0.0
+    resume_from_run = None
+    if options.previous_timing:
+        prior = json.loads(options.previous_timing.read_text(encoding="utf-8"))
+        previous = float(prior["time/total_seconds"])
+        resume_from_run = prior["run_id"]
+        if prior["config"]["tokenizer_sha256"] != tokenizer_hashes:
+            parser.error("Cannot change tokenizer when resuming")
+        if args.resume is None:
+            parser.error("--previous-timing requires --resume")
+        for key in ("vocab_size", "context_length", "d_model", "num_layers", "num_heads", "d_ff", "rope_theta"):
+            if prior["config"][key] != getattr(args, key):
+                parser.error(f"Resumed model configuration differs: {key}")
+        if args.resume.resolve() != Path(prior["checkpoint_path"]).resolve():
+            parser.error("--resume must point to the checkpoint in the previous result.json")
+    elif args.resume is not None:
+        parser.error("--resume requires --previous-timing so cumulative budget is preserved")
+    if not math.isfinite(previous) or not 0 <= previous < options.max_train_seconds:
+        parser.error("Prior elapsed time is invalid or the cumulative budget is exhausted")
+
+    config = {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}
+    config.update(
+        {
+            "train_file": str(options.train_text.resolve()),
+            "valid_file": str(options.val_text.resolve()),
+            "bpe_prefix": str(options.tokenizer_prefix.resolve()),
+            "tokenizer_sha256": tokenizer_hashes,
+            "special_tokens": tokenizer.get_special_tokens(),
+            "previous_elapsed_seconds": previous,
+            "resume_from_run": resume_from_run,
+            "max_train_seconds": options.max_train_seconds,
+            "finalize_reserve_seconds": options.finalize_reserve_seconds,
+            "validation_policy": "consecutive non-overlapping context blocks; every target once; include final partial block",
+            "extra_tokens_inserted": False,
+        }
+    )
+    deadline = PROGRAM_STARTED_CLOCK + options.max_train_seconds - previous
+    stop_training = deadline - options.finalize_reserve_seconds
+    with experiment("transformer", config, root=ROOT) as run:
+        out = ROOT / "outputs" / run.id
+        args.checkpoint_path = out / "last.pt"
+        args.program_started_clock = PROGRAM_STARTED_CLOCK
+        args.previous_elapsed_seconds = previous
+        report = {
+            "run_id": run.id,
+            "resume_from_run": resume_from_run,
+            "config": config,
+            "checkpoint_path": str(args.checkpoint_path),
+            "status": "failed",
+        }
+        run.define_metric("train/step")
+        run.define_metric("train/ppl", step_metric="train/step")
+        run.define_metric("time/elapsed_seconds", step_metric="train/step")
+        print(f"Run ID: {run.id}\nW&B: {run.url}\nLocal outputs: {out}", flush=True)
+        try:
+            if time.perf_counter() >= stop_training:
+                raise TimeoutError("No time remains before the finalization reserve.")
+            for name, source in (("train", options.train_text), ("val", options.val_text)):
+                destination = out / f"{name}.bin"
+                dtype, count = encode_file(tokenizer, source, destination, stop_training)
+                setattr(args, f"{name}_data", destination)
+                args.data_dtype = dtype
+                print(f"Encoded {source}: {count:,} tokens -> {destination}", flush=True)
+            result = train(args, run=run, stop_training_clock=stop_training)
+            report.update(result)
+            report["status"] = "completed"
+        finally:
+            # Training synchronizes CUDA before returning; uploads below are excluded.
+            ended_unix = time.time()
+            current = time.perf_counter() - PROGRAM_STARTED_CLOCK
+            total = previous + current
+            report.update(
+                {
+                    "time/program_started_utc": datetime.fromtimestamp(PROGRAM_STARTED_UNIX, UTC).isoformat(),
+                    "time/experiment_ended_utc": datetime.fromtimestamp(ended_unix, UTC).isoformat(),
+                    "time/previous_elapsed_seconds": previous,
+                    "time/current_run_seconds": current,
+                    "time/total_seconds": total,
+                    "time/difference_from_6h_seconds": total - 21_600,
+                    "time/within_6h": total <= 21_600,
+                }
+            )
+            if report["status"] == "completed":
+                count = report["val_token_count"]
+                nll = report["val_nll_sum"] / count if count > 0 else float("nan")
+                if math.isfinite(nll) and 0 <= nll < 709:
+                    report.update(
+                        {
+                            "val/ppl": math.exp(nll),
+                            "val/token_count": count,
+                            "train/final_step": report["step"],
+                            "train/total_seconds": total,
+                        }
+                    )
+                else:
+                    report["status"] = "invalid_validation"
+            if total > options.max_train_seconds:
+                report["status"] = "over_budget"
+            path = out / "result.json"
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            run.summary.update({key: value for key, value in report.items() if key != "config"})
+            run.save(str(path), base_path=str(out), policy="now")
+            print(json.dumps({key: value for key, value in report.items() if key != "config"}), flush=True)
+        if report["status"] != "completed":
+            raise RuntimeError(f"Run did not produce a valid in-budget score: {report['status']}")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
