@@ -7,7 +7,7 @@ import wandb
 
 
 @contextmanager
-def experiment(task, config, root="."):
+def experiment(task, config, root=".", *, name=None):
     root = Path(root).resolve()
     skipped = {".git", ".venv", "venv", "outputs", "wandb", "data", "datasets", "checkpoints", "__pycache__", ".pytest_cache"}
     suffixes = {".py", ".sh", ".ipynb", ".cu", ".c", ".cpp", ".h", ".rs"}
@@ -28,7 +28,7 @@ def experiment(task, config, root="."):
         project=os.environ.get("WANDB_PROJECT", "lmfs-assignment1"),
         id=uuid.uuid4().hex[:12],
         resume="never",
-        name=f"{os.environ['STUDENT_ID']}-{task}",
+        name=name or os.environ.get("WANDB_NAME") or f"{os.environ['STUDENT_ID']}-{task}",
         group=os.environ["STUDENT_ID"],
         job_type=task,
         config=config,

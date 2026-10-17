@@ -1,4 +1,6 @@
 import time
+import argparse
+import json
 
 import numpy as np
 import pytest
@@ -8,6 +10,7 @@ import torch.nn.functional as F
 from cs336_basics.BPE.bpe import BPE
 from cs336_basics.encoding import encode_file
 from cs336_basics.main import evaluate_full
+from transformer_main import read_previous_run
 
 
 @pytest.mark.parametrize("length", [2, 4, 5, 9, 20, 33])
@@ -86,3 +89,49 @@ def test_failed_encoding_preserves_existing_destination(tmp_path, workers):
         encode_file(tokenizer, source, destination, time.perf_counter() + 60, workers=workers)
     assert destination.read_bytes() == b"previous-complete-result"
     assert not destination.with_suffix(".tmp").exists()
+
+
+def test_restart_after_encoding_keeps_prior_time_and_run_link(tmp_path):
+    prior_path = tmp_path / "result.json"
+    hashes = {"vocab": "v", "merges": "m", "special_tokens": "s"}
+    prior = {
+        "run_id": "old-run",
+        "status": "failed",
+        "checkpoint_path": str(tmp_path / "last.pt"),
+        "time/total_seconds": 6657.47,
+        "config": {"tokenizer_sha256": hashes},
+    }
+    prior_path.write_text(json.dumps(prior), encoding="utf-8")
+    args = argparse.Namespace(resume=None)
+    assert read_previous_run(prior_path, hashes, args) == (6657.47, "old-run")
+    with pytest.raises(ValueError, match="Cannot change tokenizer"):
+        read_previous_run(prior_path, {"vocab": "different"}, args)
+    (tmp_path / "last.pt").write_bytes(b"checkpoint-exists")
+    with pytest.raises(ValueError, match="no checkpoint"):
+        read_previous_run(prior_path, hashes, args)
+
+
+def test_checkpoint_resume_requires_matching_model_and_checkpoint(tmp_path):
+    prior_path = tmp_path / "result.json"
+    checkpoint = tmp_path / "last.pt"
+    config = dict(
+        vocab_size=32000, context_length=256, d_model=512, num_layers=4, num_heads=16, d_ff=1344, rope_theta=10000.0
+    )
+    hashes = {"vocab": "v"}
+    prior = {
+        "run_id": "old-run",
+        "status": "completed",
+        "checkpoint_path": str(checkpoint),
+        "time/total_seconds": 100.0,
+        "config": {**config, "tokenizer_sha256": hashes},
+    }
+    prior_path.write_text(json.dumps(prior), encoding="utf-8")
+    args = argparse.Namespace(resume=checkpoint, **config)
+    assert read_previous_run(prior_path, hashes, args) == (100.0, "old-run")
+    args.d_model = 256
+    with pytest.raises(ValueError, match="d_model"):
+        read_previous_run(prior_path, hashes, args)
+    args.d_model = 512
+    args.resume = tmp_path / "another.pt"
+    with pytest.raises(ValueError, match="checkpoint in the previous"):
+        read_previous_run(prior_path, hashes, args)

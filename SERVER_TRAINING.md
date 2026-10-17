@@ -136,6 +136,20 @@ bash run_server.sh train \
 优化器和步数恢复；当前 checkpoint 格式不保存 RNG 状态，所以不保证与不中断训练逐位一致。
 正常结束或 Python 异常会保存计时结果；强杀、机器断电无法保证完整记录，不能用最后一条训练日志代替真实累计耗时。
 
+如果旧 Run 在编码期间被中断，尚无 checkpoint，可以仅传 `--previous-timing` 而不传 `--resume`：
+入口会核对旧 Run 失败且没有已保存模型，继承旧 Run 的累计耗时并记录关联 Run，然后从头编码和初始化模型。
+有 checkpoint 时仍必须通过 `--resume` 恢复。可用 `--run-name` 设置易区分的 W&B 实验名，例如：
+
+```bash
+bash run_server.sh train \
+  --tokenizer-prefix /绝对路径/原BPE/bpe/tokenizer \
+  --previous-timing /绝对路径/被中断RUN/result.json \
+  --run-name 10234900421-transformer-owt-parallel8-restart \
+  --encoding-workers 8
+```
+
+两项任务也都支持 `WANDB_NAME` 环境变量；Transformer 的 `--run-name` 优先。
+
 ## 5. 离线与提交
 
 网络不可用时，在运行前设置：
