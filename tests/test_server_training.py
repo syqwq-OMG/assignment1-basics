@@ -11,6 +11,7 @@ from cs336_basics.BPE.bpe import BPE
 from cs336_basics.encoding import encode_file
 from cs336_basics.main import evaluate_full
 from transformer_main import read_previous_run
+from wandb_record import experiment
 
 
 @pytest.mark.parametrize("length", [2, 4, 5, 9, 20, 33])
@@ -135,3 +136,37 @@ def test_checkpoint_resume_requires_matching_model_and_checkpoint(tmp_path):
     args.resume = tmp_path / "another.pt"
     with pytest.raises(ValueError, match="checkpoint in the previous"):
         read_previous_run(prior_path, hashes, args)
+
+
+@pytest.mark.parametrize(
+    "explicit_name,environment_name,expected",
+    [
+        ("owt-parallel8-restart", "environment-name", "owt-parallel8-restart"),
+        (None, "environment-name", "environment-name"),
+        (None, None, "student-transformer"),
+    ],
+)
+def test_source_inventory_does_not_overwrite_experiment_name(
+    tmp_path, monkeypatch, explicit_name, environment_name, expected
+):
+    import wandb
+
+    (tmp_path / "source.py").write_text("pass\n", encoding="utf-8")
+    (tmp_path / "z-last-file.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("STUDENT_ID", "student")
+    monkeypatch.setenv("WANDB_ENTITY", "test-entity")
+    if environment_name is None:
+        monkeypatch.delenv("WANDB_NAME", raising=False)
+    else:
+        monkeypatch.setenv("WANDB_NAME", environment_name)
+
+    class InitReached(Exception):
+        pass
+
+    def capture_init(**kwargs):
+        assert kwargs["name"] == expected
+        raise InitReached
+
+    monkeypatch.setattr(wandb, "init", capture_init)
+    with pytest.raises(InitReached), experiment("transformer", {}, root=tmp_path, name=explicit_name):
+        pass

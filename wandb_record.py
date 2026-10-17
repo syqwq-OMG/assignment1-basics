@@ -14,12 +14,12 @@ def experiment(task, config, root=".", *, name=None):
     sources = []
     for directory, dirs, names in os.walk(root):
         dirs[:] = sorted(d for d in dirs if d not in skipped)
-        for name in sorted(names):
-            path = Path(directory) / name
+        for filename in sorted(names):
+            path = Path(directory) / filename
             rel = path.relative_to(root)
             if (
                 path.suffix in suffixes
-                or name in {"pyproject.toml", "uv.lock", ".python-version"}
+                or filename in {"pyproject.toml", "uv.lock", ".python-version"}
                 or (rel.parts[0] == "configs" and path.suffix in {".json", ".yaml", ".yml", ".toml"})
             ):
                 sources.append(path)
