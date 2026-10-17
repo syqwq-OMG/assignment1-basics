@@ -63,6 +63,34 @@ bash run_server.sh train \
 原文编码调用仓库自己的 BPE，在完整特殊文档标记处切分，保留空白；没有该标记时保留整个文本编码，不任意截断。
 不额外插入 BOS/EOS。训练/验证 token 文件保存在本次 Run 的 `outputs/RUN_ID/` 下。
 
+编码默认使用最多 8 个独立 CPU 进程，每个进程保留 65536 项预分词缓存；不使用 Python 线程执行 BPE。
+任务按完整 `<|endoftext|>` 边界切分，结果按原文顺序写入，在途任务数最多为进程数的两倍。
+没有安全文档标记时自动保留完整文本单任务编码，避免改变分词结果。
+每约 10 秒显示编码百分比、吞吐和 ETA。可按分配到的 CPU 资源调整：
+
+```bash
+bash run_server.sh train \
+  --tokenizer-prefix outputs/BPE_RUN_ID/bpe/tokenizer \
+  --encoding-workers 8 \
+  --encoding-cache-size 65536 \
+  --encoding-chunk-mib 1
+```
+
+所有参数记录到 W&B config；编码仍计入累计六小时预算。
+已运行的旧进程不会自动采用新实现，不要在其运行目录中覆盖源码。
+若需切换实现，应先保留旧 Run 的实际耗时和记录，再启动独立的新 Run，不得重置关联实验累计预算。
+
+可在独立目录运行小样本 CPU 基准，不启动正式训练、不创建 W&B Run，也不修改公共数据：
+
+```bash
+python benchmark_encoding.py \
+  --tokenizer-prefix /绝对路径/本人BPE/bpe/tokenizer \
+  --sample-mib 32 --workers 1 4 8 --output encoding-benchmark.json
+```
+
+基准使用本人已训练的分词器，对比原 2048 项缓存的单进程与 65536 项缓存的并行编码；
+每个配置都必须产生相同 token 数和相同输出 SHA256。
+
 每 100 次更新记录一次区间训练 PPL；最后不足 100 步的区间也记录。
 周期验证是训练期间的随机抽样诊断；最终评分另行遍历完整验证 token 序列，按总 NLL / 总目标 token 数计算 PPL。
 验证按不重叠的 context-length 块重置上下文，覆盖每个 next-token 目标一次（共 N−1 个），包含最后不足一块的部分，无 padding。

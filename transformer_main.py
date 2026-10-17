@@ -10,48 +10,17 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-import numpy as np
-
 from cs336_basics.BPE.bpe import BPE
+from cs336_basics.encoding import encode_file
 from cs336_basics.main import parse_args as parse_training_args, train
 from wandb_record import experiment
 
 ROOT = Path(__file__).resolve().parent
-
-
-def encode_file(tokenizer, source, destination, deadline_clock, chunk_size=1024 * 1024):
-    """Stream at reserved document boundaries, preserving whitespace and markers.
-
-    Arbitrary reads are retained until a complete <|endoftext|> boundary;
-    without that reserved marker, use a single encode call for correctness.
-    """
-    marker = "<|endoftext|>"
-    split_documents = marker in tokenizer.get_special_tokens()
-    dtype = np.dtype("uint16" if len(tokenizer.get_vocab()) <= 65_536 else "uint32")
-    count = 0
-    temporary = destination.with_suffix(".tmp")
-    with source.open(encoding="utf-8", newline="") as reader, temporary.open("wb") as writer:
-        pending = ""
-        while chunk := reader.read(chunk_size):
-            if time.perf_counter() >= deadline_clock:
-                raise TimeoutError("Budget reserve reached while encoding data; no training started.")
-            pending += chunk
-            if split_documents and marker in pending:
-                end = pending.rfind(marker) + len(marker)
-                ids = tokenizer.encode(pending[:end])
-                np.asarray(ids, dtype=dtype).tofile(writer)
-                count += len(ids)
-                pending = pending[end:]
-        if pending:
-            ids = tokenizer.encode(pending)
-            np.asarray(ids, dtype=dtype).tofile(writer)
-            count += len(ids)
-    temporary.replace(destination)
-    return dtype.name, count
 
 
 def main(argv=None):
@@ -65,7 +34,12 @@ def main(argv=None):
     parser.add_argument("--previous-timing", type=Path, help="Previous run's result.json; required with --resume.")
     parser.add_argument("--max-train-seconds", type=float, default=21_600)
     parser.add_argument("--finalize-reserve-seconds", type=float, default=1_800)
+    parser.add_argument("--encoding-workers", type=int, default=min(8, getattr(os, "process_cpu_count", os.cpu_count)() or 1))
+    parser.add_argument("--encoding-cache-size", type=int, default=65_536)
+    parser.add_argument("--encoding-chunk-mib", type=int, default=1)
     options, forwarded = parser.parse_known_args(argv)
+    if options.encoding_workers < 1 or options.encoding_cache_size < 0 or options.encoding_chunk_mib < 1:
+        parser.error("Encoding workers/chunk size must be positive; cache size cannot be negative")
     if not math.isfinite(options.max_train_seconds) or not 0 < options.max_train_seconds <= 21_600:
         parser.error("--max-train-seconds must be in (0, 21600]")
     if (
@@ -140,6 +114,9 @@ def main(argv=None):
             "resume_from_run": resume_from_run,
             "max_train_seconds": options.max_train_seconds,
             "finalize_reserve_seconds": options.finalize_reserve_seconds,
+            "encoding_workers": options.encoding_workers,
+            "encoding_cache_size": options.encoding_cache_size,
+            "encoding_chunk_mib": options.encoding_chunk_mib,
             "validation_policy": "consecutive non-overlapping context blocks; every target once; include final partial block",
             "extra_tokens_inserted": False,
         }
@@ -167,7 +144,15 @@ def main(argv=None):
                 raise TimeoutError("No time remains before the finalization reserve.")
             for name, source in (("train", options.train_text), ("val", options.val_text)):
                 destination = out / f"{name}.bin"
-                dtype, count = encode_file(tokenizer, source, destination, stop_training)
+                dtype, count = encode_file(
+                    tokenizer,
+                    source,
+                    destination,
+                    stop_training,
+                    chunk_size=options.encoding_chunk_mib * 1024 * 1024,
+                    workers=options.encoding_workers,
+                    cache_size=options.encoding_cache_size,
+                )
                 setattr(args, f"{name}_data", destination)
                 args.data_dtype = dtype
                 print(f"Encoded {source}: {count:,} tokens -> {destination}", flush=True)
