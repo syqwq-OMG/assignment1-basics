@@ -19,7 +19,7 @@ import sys
 import time
 
 
-TRAIN_LINE = re.compile(r"iter=(\d+)/\d+ train_loss=([\d.]+).*elapsed=([\d.]+)s")
+TRAIN_LINE = re.compile(r"^iter=(\d+)/\d+ train_loss=([\d.]+).*elapsed=([\d.]+)s", re.MULTILINE)
 
 
 def write_json(path, value):

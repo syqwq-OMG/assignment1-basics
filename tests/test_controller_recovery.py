@@ -8,6 +8,13 @@ import pytest
 import server_search
 
 
+def test_timing_ignores_training_examples_in_printed_source():
+    source = '00045 | print("iter=100/1000 train_loss=5.0 elapsed=10.0s")\n'
+    actual = 'iter=300/1000 train_loss=4.0 elapsed=25.0s\n'
+    assert server_search.TRAIN_LINE.search(source) is None
+    assert server_search.TRAIN_LINE.search(source + actual)[1] == "300"
+
+
 @pytest.mark.parametrize("fail_final", [False, True])
 def test_recovery_preserves_runs_carries_failed_time_and_rejects_false_completion(tmp_path, monkeypatch, fail_final):
     monkeypatch.setattr(server_search, "__file__", str(tmp_path / "server_search.py"))
