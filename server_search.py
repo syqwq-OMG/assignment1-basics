@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -42,6 +43,10 @@ def main():
     parser.add_argument("--adopt-log", type=Path)
     parser.add_argument("--runtime-train-data", type=Path)
     parser.add_argument("--runtime-val-data", type=Path)
+    parser.add_argument("--continue-search", action="store_true", help="Skip completed imported pilots; retry failures with cumulative timing")
+    parser.add_argument("--runtime-choice", type=Path, help="Reuse an already validated runtime benchmark decision")
+    parser.add_argument("--train-text", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_train.txt"))
+    parser.add_argument("--val-text", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_valid.txt"))
     options = parser.parse_args()
     root = Path(__file__).resolve().parent
     end = datetime.fromisoformat(options.end).timestamp()
@@ -83,6 +88,8 @@ def main():
     if options.dry_run:
         print(json.dumps(plan, indent=2))
         return
+    if not options.train_text.is_file() or not options.val_text.is_file():
+        raise FileNotFoundError("Original OWT text paths must exist before starting the campaign")
     options.output.mkdir(parents=True, exist_ok=True)
     lock = (options.output / "controller.lock").open("w")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -101,6 +108,12 @@ def main():
         entry["candidate"].setdefault("precision", "tf32")
         entry["candidate"].setdefault("compile_model", False)
     runtime_choice = {"precision": "tf32", "compile_model": False}
+    if options.runtime_choice:
+        prior_runtime = json.loads(options.runtime_choice.read_text())
+        if not prior_runtime.get("stable"):
+            raise ValueError("Cannot reuse an unstable runtime")
+        runtime_choice = {key: prior_runtime[key] for key in ("precision", "compile_model")}
+        write_json(options.output / "runtime-choice.json", prior_runtime)
 
     def status(message):
         line = f"{datetime.now().astimezone().isoformat()} {message}"
@@ -109,6 +122,11 @@ def main():
 
     def execute(candidate, stage, index):
         label = f"{stage}-{index}-{candidate['label']}"
+        if options.continue_search and stage == "pilot":
+            completed = next((r for r in results if r["label"] == label and r["valid"]), None)
+            if completed:
+                status(f"PRESERVED {label} PPL={completed['ppl']}; not rerunning completed model")
+                return completed
         # Leave 15 minutes outside each run for uploads/exit, plus 10 minutes
         # before the allocation ends. Never increase an individual 6h budget.
         available = math.floor(end - time.time() - 1500)
@@ -127,8 +145,9 @@ def main():
             cycle = max(1000, int(train_seconds / candidate["seconds_per_step"] * 0.95))
             warmup = min(500, max(100, cycle // 100))
         command = [options.python, "transformer_main.py",
-                   "--run-name", f"10234900421-owt-gpu3-20261020-{label}",
+                   "--run-name", f"10234900421-owt-gpu3-20261020-{label}" + ("-recovery" if options.continue_search else ""),
                    "--tokenizer-prefix", str(options.tokenizer_prefix.resolve()),
+                   "--train-text", str(options.train_text.resolve()), "--val-text", str(options.val_text.resolve()),
                    "--encoding-workers", "8", "--encoding-cache-size", "65536",
                    "--device", "cuda", "--max-iters", "1000000",
                    "--warmup-iters", str(warmup), "--cosine-cycle-iters", str(cycle),
@@ -139,6 +158,28 @@ def main():
                    "--checkpoint-interval", "10000",
                    "--max-train-seconds", str(budget),
                    "--finalize-reserve-seconds", str(reserve)]
+        if options.continue_search:
+            failures = [r for r in results if r["label"] == label and not r["valid"]]
+            previous = next((r for r in reversed(failures) if r.get("result")), None)
+            if previous:
+                prior_report = json.loads(Path(previous["result"]).read_text())
+                if prior_report["status"] != "failed" or Path(prior_report["checkpoint_path"]).exists():
+                    raise RuntimeError("Automatic restart only supports failures before model checkpoint creation")
+                command += ["--previous-timing", previous["result"]]
+            elif failures:
+                # Argument validation failures produced no W&B run/checkpoint.
+                # Preserve a conservative, auditable upper bound on their
+                # startup time instead of silently resetting the six-hour clock.
+                ledger = options.output / f"{label}-startup-failures.json"
+                hashes = {suffix: hashlib.sha256(Path(f"{options.tokenizer_prefix}.{suffix}.json").read_bytes()).hexdigest()
+                          for suffix in ("vocab", "merges", "special_tokens")}
+                write_json(ledger, {"run_id": None, "status": "failed",
+                                   "checkpoint_path": str(options.output / f"{label}-no-checkpoint.pt"),
+                                   "config": {"tokenizer_sha256": hashes},
+                                   "time/total_seconds": sum(r["wall_seconds"] for r in failures),
+                                   "accounting_note": "No W&B run or model was created. Controller wall time is a conservative startup-time bound.",
+                                   "startup_failures": failures})
+                command += ["--previous-timing", str(ledger)]
         shared = dict(plan["shared"])
         shared.update({key: candidate[key] for key in shared if key in candidate})
         precision = candidate.get("precision", runtime_choice["precision"])
@@ -204,7 +245,7 @@ def main():
                 seconds_per_step = ((float(last[3]) - float(first[3])) / steps if steps > 0
                                     else float(last[3]) / int(last[1]))
                 preparation = preparation or max(0, report["time/total_seconds"] - float(last[3]) - reserve)
-                finalization = max(0, report["time/total_seconds"] - preparation - float(last[3]))
+                finalization = max(0, report["time/current_run_seconds"] - preparation - float(last[3]))
                 entry.update(seconds_per_step=seconds_per_step, preparation_seconds=preparation,
                              finalize_estimate=max(900, int(finalization * 1.7 + 180)))
         results.append(entry)
@@ -247,7 +288,7 @@ def main():
                               and report.get("val_token_count") == 66401097 and math.isfinite(entry["ppl"]))
             results.append(entry)
         write_json(options.output / "experiments.json", results)
-        if options.width_batch:
+        if options.width_batch and not options.runtime_choice:
             bench_results = []
             for precision in ("fp32", "tf32", "bf16"):
                 for compiled in (False, True):
@@ -285,11 +326,14 @@ def main():
             raise RuntimeError("No valid pilot; refusing to choose an unverified configuration")
         finalists = ranked[:2]
         write_json(options.output / "selection.json", finalists)
+        final_outcomes = []
         for index, pilot in enumerate(finalists, 1):
             candidate = dict(pilot["candidate"])
             candidate.update({key: pilot[key] for key in
                               ("seconds_per_step", "preparation_seconds", "finalize_estimate")})
-            execute(candidate, "final", index)
+            final_outcomes.append(execute(candidate, "final", index))
+        if len(final_outcomes) != 2 or not all(r is not None and r["valid"] for r in final_outcomes):
+            raise RuntimeError("Campaign incomplete: final training failed or was skipped; inspect experiment logs")
         status("COMPLETED: ranking.json and best.json contain full-validation results and W&B links")
     except BaseException as error:
         status(f"FAILED: {type(error).__name__}: {error}")
