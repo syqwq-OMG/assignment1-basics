@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import random
 import sys
 import time
@@ -56,6 +57,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     training.add_argument("--eps", type=float, default=1e-8)
     training.add_argument("--max-grad-norm", type=float, default=1.0)
     training.add_argument("--seed", type=int, default=42)
+    training.add_argument("--precision", choices=("fp32", "tf32", "bf16"), default="tf32")
+    training.add_argument("--compile", dest="compile_model", action="store_true")
     training.add_argument(
         "--device",
         default="auto",
@@ -136,7 +139,23 @@ def load_token_data(path: Path, raw_dtype: str) -> np.ndarray:
 
 def language_model_loss(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     """Average next-token cross entropy over batch and sequence dimensions."""
-    return cross_entropy_loss(logits.reshape(-1, logits.shape[-1]), targets.reshape(-1))
+    return cross_entropy_loss(logits.float().reshape(-1, logits.shape[-1]), targets.reshape(-1))
+
+
+def configure_runtime(model, precision="tf32", compile_model=False, *, compile_backend="inductor"):
+    """Keep parameters/checkpoints FP32; select autocast and optional in-place compilation."""
+    os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"] = "0" if precision == "fp32" else "1"
+    torch.set_float32_matmul_precision("highest" if precision == "fp32" else "high")
+    model._use_bf16 = precision == "bf16"
+    if compile_model:
+        # nn.Module.compile preserves the original module and state_dict names.
+        model.compile(backend=compile_backend)
+    return model
+
+
+def forward_logits(model, inputs):
+    with torch.autocast(inputs.device.type, dtype=torch.bfloat16, enabled=getattr(model, "_use_bf16", False)):
+        return model(inputs)
 
 
 @torch.inference_mode()
@@ -152,7 +171,7 @@ def estimate_loss(
     total_loss = 0.0
     for _ in range(eval_iters):
         inputs, targets = get_batch(dataset, batch_size, context_length, str(device))
-        total_loss += language_model_loss(model(inputs), targets).item()
+        total_loss += language_model_loss(forward_logits(model, inputs), targets).item()
     model.train()
     return total_loss / eval_iters
 
@@ -176,7 +195,7 @@ def evaluate_full(model, dataset, batch_size, context_length, device):
             inputs = torch.tensor(np.array(dataset[start : start + size]), dtype=torch.long, device=device)
             targets = torch.tensor(np.array(dataset[start + 1 : start + size + 1]), dtype=torch.long, device=device)
             loss = language_model_loss(
-                model(inputs.reshape(count, context_length)), targets.reshape(count, context_length)
+                forward_logits(model, inputs.reshape(count, context_length)), targets.reshape(count, context_length)
             )
             total_nll.add_(loss.double() * size)
             token_count += size
@@ -184,7 +203,7 @@ def evaluate_full(model, dataset, batch_size, context_length, device):
         if start < len(dataset) - 1:
             inputs = torch.tensor(np.array(dataset[start:-1]), dtype=torch.long, device=device).unsqueeze(0)
             targets = torch.tensor(np.array(dataset[start + 1 :]), dtype=torch.long, device=device).unsqueeze(0)
-            total_nll.add_(language_model_loss(model(inputs), targets).double() * targets.numel())
+            total_nll.add_(language_model_loss(forward_logits(model, inputs), targets).double() * targets.numel())
             token_count += targets.numel()
         return float(total_nll.item()), token_count
     finally:
@@ -230,6 +249,8 @@ def train(args: argparse.Namespace, run=None, stop_training_clock: float | None 
         if start_iteration > args.max_iters:
             raise ValueError(f"checkpoint iteration {start_iteration} exceeds requested --max-iters {args.max_iters}")
 
+    configure_runtime(model, getattr(args, "precision", "tf32"), getattr(args, "compile_model", False))
+
     args.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     model.train()
     started_at = time.perf_counter()
@@ -252,7 +273,7 @@ def train(args: argparse.Namespace, run=None, stop_training_clock: float | None 
 
         inputs, targets = get_batch(train_data, args.batch_size, args.context_length, str(device))
         optimizer.zero_grad(set_to_none=True)
-        loss = language_model_loss(model(inputs), targets)
+        loss = language_model_loss(forward_logits(model, inputs), targets)
         loss.backward()
         gradient_clipping(model.parameters(), args.max_grad_norm)
         optimizer.step()

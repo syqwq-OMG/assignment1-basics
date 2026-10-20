@@ -12,7 +12,7 @@ class RMSNorm(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         in_type = x.dtype
-        x.to(torch.float32)
+        x = x.to(torch.float32)
         
         rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
         

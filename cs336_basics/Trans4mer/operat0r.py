@@ -38,8 +38,11 @@ def softmax(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
     Returns:
         torch.Tensor: Softmax of the input tensor along the specified dimension.
     """
+    original_dtype = x.dtype
+    if x.dtype in (torch.bfloat16, torch.float16):
+        x = x.float()
     exp_x = torch.exp(x - torch.max(x, dim=dim, keepdim=True).values)
-    return exp_x / torch.sum(exp_x, dim=dim, keepdim=True)
+    return (exp_x / torch.sum(exp_x, dim=dim, keepdim=True)).to(original_dtype)
 
 
 def cross_entropy_loss(inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
