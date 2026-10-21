@@ -3,6 +3,8 @@
 按 [课程 Assignment 1 说明](https://dasellmg.yuque.com/org-wiki-dasellmg-vsl5wg/lmfs2026/rtubf0h818hevi7h)（2026-10-15 更新）准备。
 正式实验使用公共 OWT 数据、本人 BPE 和两个独立 W&B Run。公共环境与原始数据只读。
 
+新服务器需要安装环境、下载原文并重新生成vocab/merges时，按[从零部署训练](from-scratch.md)执行。本页侧重已有课程环境的使用。
+
 最终结果与提交链接见 [提交说明](submission.md)，模块位置见 [目录说明](code-layout.md)。当前最佳配置保存在 `configs/owt_best.json`，通过下列命令查看或启动新实验：
 
 ```bash

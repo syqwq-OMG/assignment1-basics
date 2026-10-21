@@ -5,6 +5,7 @@
 最佳正式结果：**完整 OWT 验证 PPL 27.9381**，累计耗时约5小时48分钟。
 
 - [最终成绩与提交链接](docs/submission.md)
+- [新服务器从零部署训练](docs/from-scratch.md)：下载文本、从零训练BPE生成vocab/merges，再训练Transformer。
 - [代码目录说明](docs/code-layout.md)
 - [服务器运行指南](docs/server-training.md)
 - [实验与故障恢复记录](docs/experiments/2026-10-20.md)
@@ -51,7 +52,7 @@ bash run_server.sh bpe --num-threads 8
 
 ```bash
 bash run_server.sh best \
-  --tokenizer-prefix /ai/lmfs2026/sunyuquan/assignment1-basics/outputs/507bb0852a58/bpe/tokenizer \
+  --tokenizer-prefix outputs/本次BPE_RUN_ID/bpe/tokenizer \
   --print-command
 ```
 

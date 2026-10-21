@@ -43,9 +43,10 @@ python -m scripts.train_best --help
 ## 文档和产物
 
 - `docs/server-training.md`：服务器操作和计时说明。
+- `docs/from-scratch.md`：新服务器安装、原始数据下载、从零生成vocab/merges与训练模型的完整流程。
 - `docs/submission.md`：最终成绩、提交链接和模型位置。
 - `docs/experiments/2026-10-20.md`：训练和故障恢复历史；以开头的最终结果为准。
 - `docs/reference/leaderboard-review.md`：Stanford公开配置调研。
 - `outputs/`、`wandb/`、`ignored/`：本地生成文件或资料，仍由 `.gitignore` 排除。
 
-已完成实验的服务器目录和W&B源码快照保持原样。整理后的代码位于 `chore/organize-submission`；正式成绩对应的源码以各run快照和 `train/precision-compile` 分支历史为准。
+已完成实验的服务器目录和W&B源码快照保持原样。整理后的代码已并入 `main`；正式成绩对应的源码以各run快照和 `train/precision-compile` 分支历史为准。
