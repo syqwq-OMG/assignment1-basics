@@ -1,54 +1,84 @@
-# CS336 Spring 2025 Assignment 1: Basics
+# Assignment 1：BPE 与 Transformer
 
-For a full description of the assignment, see the assignment handout at
-[cs336_assignment1_basics.pdf](./cs336_assignment1_basics.pdf)
+本人实现的 BPE 和 decoder-only Transformer，包含 OWT 正式训练、W&B 源码记录、六小时累计计时、BF16 与 torch.compile 实验支持。
 
-If you see any issues with the assignment handout or code, please feel free to
-raise a GitHub issue or open a pull request with a fix.
+最佳正式结果：**完整 OWT 验证 PPL 27.9381**，累计耗时约5小时48分钟。
 
-## Setup
+- [最终成绩与提交链接](docs/submission.md)
+- [代码目录说明](docs/code-layout.md)
+- [服务器运行指南](docs/server-training.md)
+- [实验与故障恢复记录](docs/experiments/2026-10-20.md)
+- [Stanford leaderboard 调研](docs/reference/leaderboard-review.md)
+- [最佳超参数配置](configs/owt_best.json)
+- [原始 Stanford 作业说明](cs336_assignment1_basics.pdf)
 
-课程服务器训练（公共环境、OWT、W&B、最终评分与续训）见 [SERVER_TRAINING.md](./SERVER_TRAINING.md)。
+## 目录
 
-### Environment
-We manage our environments with `uv` to ensure reproducibility, portability, and ease of use.
-Install `uv` [here](https://github.com/astral-sh/uv#installation) (recommended), or run `pip install uv`/`brew install uv`.
-We recommend reading a bit about managing projects in `uv` [here](https://docs.astral.sh/uv/guides/projects/#managing-dependencies) (you will not regret it!).
-
-You can now run any code in the repo using
-```sh
-uv run <python_file_path>
-```
-and the environment will be automatically solved and activated when necessary.
-
-### Run unit tests
-
-
-```sh
-uv run pytest
-```
-
-Initially, all tests should fail with `NotImplementedError`s.
-To connect your implementation to the tests, complete the
-functions in [./tests/adapters.py](./tests/adapters.py).
-
-### Download data
-Download the TinyStories data and a subsample of OpenWebText
-
-``` sh
-mkdir -p data
-cd data
-
-wget https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStoriesV2-GPT4-train.txt
-wget https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStoriesV2-GPT4-valid.txt
-
-wget https://huggingface.co/datasets/stanford-cs336/owt-sample/resolve/main/owt_train.txt.gz
-gunzip owt_train.txt.gz
-wget https://huggingface.co/datasets/stanford-cs336/owt-sample/resolve/main/owt_valid.txt.gz
-gunzip owt_valid.txt.gz
-
-cd ..
+```text
+assignment1-basics/
+├── transformer_main.py       # 正式 Transformer 实验入口
+├── record_bpe.py             # 正式 BPE 实验入口
+├── wandb_record.py           # W&B 源码和评分记录
+├── run_server.sh             # check / bpe / train / best
+├── w-b.sh                    # 个人实验默认配置（不含API Key）
+├── cs336_basics/             # 手写算法、训练循环和生成
+├── scripts/                  # 检查、基准、搜索和配置启动工具
+├── configs/                  # 可复用超参数
+├── docs/                     # 操作说明、最终成绩与实验历史
+├── tests/                    # 测试与官方适配
+└── test.sh                   # pytest快捷入口
 ```
 
-## maybe
-+ [bpe.py](./cs336_basics/BPE/bpe.py) may be use multi-thred to deal with the chunked data? and hope use incremental update to avoid re-computing the whole data.
+## 在课程服务器使用
+
+使用已安装的公共环境：
+
+```bash
+source /lmfs2026/env/a1/bin/activate
+source ./w-b.sh
+bash run_server.sh check
+```
+
+公共数据实际路径为 `/ai/lmfs2026/data/assignment1-data`。可用 `ASSIGNMENT_DATA_DIR`、`SERVER_PYTHON` 覆盖数据目录和Python路径。
+
+运行BPE：
+
+```bash
+bash run_server.sh bpe --num-threads 8
+```
+
+查看最佳配置生成的命令（不会启动训练）：
+
+```bash
+bash run_server.sh best \
+  --tokenizer-prefix /ai/lmfs2026/sunyuquan/assignment1-basics/outputs/507bb0852a58/bpe/tokenizer \
+  --print-command
+```
+
+正式运行时移除 `--print-command`，并按实际GPU分配设置 `CUDA_VISIBLE_DEVICES`。启动器会创建新实验，重新编码数据并从程序入口累计计时；已有正式成绩保持不变。额外训练参数可在命令末尾覆盖，例如 `--run-name`。
+
+自定义训练通过 `bash run_server.sh train --tokenizer-prefix ...` 或 `python transformer_main.py --help` 查看选项。
+
+## 辅助工具
+
+在项目根目录运行：
+
+```bash
+python -m scripts.check_server --help
+python -m scripts.benchmark_encoding --help
+python -m scripts.benchmark_runtime --help
+python -m scripts.server_search --help
+```
+
+## 本地检查
+
+沿用已有Python环境即可：
+
+```bash
+PYTHON=.venv/bin/python bash test.sh -q \
+  tests/test_runtime_options.py tests/test_controller_recovery.py \
+  tests/test_server_training.py tests/test_model.py tests/test_optimizer.py \
+  tests/test_nn_utils.py tests/test_data.py tests/test_serialization.py
+```
+
+运行全部测试可执行 `.venv/bin/python -m pytest`。依赖由 `pyproject.toml` 与 `uv.lock` 记录，课程公共环境保持只读。

@@ -48,7 +48,7 @@ def main():
     parser.add_argument("--train-text", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_train.txt"))
     parser.add_argument("--val-text", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_valid.txt"))
     options = parser.parse_args()
-    root = Path(__file__).resolve().parent
+    root = Path(__file__).resolve().parents[1]
     end = datetime.fromisoformat(options.end).timestamp()
     if options.pilot_seconds < 3600 or options.pilot_seconds > 21600:
         parser.error("pilot budget must be between 3600 and 21600 seconds")
@@ -295,7 +295,7 @@ def main():
                     label = f"runtime-{precision}-compile{int(compiled)}"
                     status(f"BENCHMARK {label} GPU=3")
                     destination = options.output / f"{label}.json"
-                    command = [options.python, "benchmark_runtime.py", "--precision", precision,
+                    command = [options.python, "-m", "scripts.benchmark_runtime", "--precision", precision,
                                "--train-data", str(options.runtime_train_data),
                                "--val-data", str(options.runtime_val_data), "--result", str(destination)]
                     if compiled:

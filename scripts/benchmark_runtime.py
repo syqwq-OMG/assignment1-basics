@@ -30,7 +30,7 @@ def main():
                   token_source="unchanged own-BPE OWT files from pilot-2; runtime benchmark only")
     started = time.perf_counter()
     name = f"10234900421-runtime-{args.precision}-compile{int(args.compile_model)}-20261020"
-    with experiment("runtime-benchmark", config, root=Path(__file__).resolve().parent, name=name) as run:
+    with experiment("runtime-benchmark", config, root=Path(__file__).resolve().parents[1], name=name) as run:
         torch.manual_seed(42)
         np.random.seed(42)
         train_data = load_token_data(args.train_data, "uint16")

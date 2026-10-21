@@ -12,7 +12,7 @@ import wandb
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data-dir", type=Path, default=Path("/data/assignment1-data"))
+    parser.add_argument("--data-dir", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data"))
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--allow-cpu", action="store_true", help="Local debugging only.")
     args = parser.parse_args()
@@ -29,7 +29,7 @@ def main():
             gpu = torch.cuda.get_device_properties(index)
             print(f"GPU {index}: {gpu.name}, {gpu.total_memory / 1024**3:.1f} GiB")
     elif not args.allow_cpu:
-        failures.append("CUDA is unavailable. Activate /env/activate_a1.sh and check GPU allocation.")
+        failures.append("CUDA is unavailable. Activate /lmfs2026/env/a1/bin/activate and check GPU allocation.")
     for filename in ("owt_train.txt", "owt_valid.txt"):
         path = args.data_dir / filename
         if path.is_file() and os.access(path, os.R_OK):

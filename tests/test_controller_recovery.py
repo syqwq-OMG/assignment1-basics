@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-import server_search
+from scripts import server_search
 
 
 def test_timing_ignores_training_examples_in_printed_source():
@@ -17,7 +17,7 @@ def test_timing_ignores_training_examples_in_printed_source():
 
 @pytest.mark.parametrize("fail_final", [False, True])
 def test_recovery_preserves_runs_carries_failed_time_and_rejects_false_completion(tmp_path, monkeypatch, fail_final):
-    monkeypatch.setattr(server_search, "__file__", str(tmp_path / "server_search.py"))
+    monkeypatch.setattr(server_search, "__file__", str(tmp_path / "scripts" / "server_search.py"))
     text = tmp_path / "owt.txt"
     text.write_text("unchanged corpus")
     tokenizer = tmp_path / "tokenizer"

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 uv run pytest --timeout 10 -v ./tests --junitxml=test_results.xml || true
 echo "Done running tests"

@@ -48,8 +48,8 @@ def main(argv=None):
         epilog="Additional model/training flags are forwarded to cs336_basics.main (python -m cs336_basics.main --help).",
     )
     parser.add_argument("--tokenizer-prefix", type=Path, required=True)
-    parser.add_argument("--train-text", type=Path, default=Path("/data/assignment1-data/owt_train.txt"))
-    parser.add_argument("--val-text", type=Path, default=Path("/data/assignment1-data/owt_valid.txt"))
+    parser.add_argument("--train-text", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_train.txt"))
+    parser.add_argument("--val-text", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_valid.txt"))
     parser.add_argument(
         "--previous-timing",
         type=Path,

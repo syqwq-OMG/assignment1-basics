@@ -3,12 +3,20 @@
 按 [课程 Assignment 1 说明](https://dasellmg.yuque.com/org-wiki-dasellmg-vsl5wg/lmfs2026/rtubf0h818hevi7h)（2026-10-15 更新）准备。
 正式实验使用公共 OWT 数据、本人 BPE 和两个独立 W&B Run。公共环境与原始数据只读。
 
+最终结果与提交链接见 [提交说明](submission.md)，模块位置见 [目录说明](code-layout.md)。当前最佳配置保存在 `configs/owt_best.json`，通过下列命令查看或启动新实验：
+
+```bash
+bash run_server.sh best --tokenizer-prefix /绝对路径/本人BPE/bpe/tokenizer --print-command
+```
+
+去掉 `--print-command` 才会开始新训练。该命令复用已经验证的超参数，新的运行结果仍以实际计时和完整验证为准。
+
 ## 1. 拉取代码并检查环境
 
 在自己的服务器项目目录操作；首次使用可先 `git clone https://github.com/syqwq-OMG/assignment1-basics.git`。
 
 ```bash
-source /env/activate_a1.sh
+source /lmfs2026/env/a1/bin/activate
 cd /ai/lmfs2026/$USER/assignment1-basics
 git pull --ff-only
 source ./w-b.sh
@@ -21,7 +29,7 @@ bash run_server.sh check --wandb
 可在 source 前 export 同名变量覆盖。`check --wandb` 会创建一个小型 environment-test Run，确认账户和项目可用。
 若 Entity 错误，按课程说明先用 W&B 默认 Entity 测试，然后设置实际可用值。
 
-运行器固定使用 `/env/a1/bin/python`，不运行 `uv sync`、`pip install`，不改动公共环境。
+运行器固定使用 `/lmfs2026/env/a1/bin/python`，不运行 `uv sync`、`pip install`，不改动公共环境。
 仅本地调试可通过 `SERVER_PYTHON=/绝对路径/python` 覆盖。
 
 ## 2. BPE 正式实验
@@ -30,9 +38,9 @@ bash run_server.sh check --wandb
 bash run_server.sh bpe
 ```
 
-默认读取 `/data/assignment1-data/owt_train.txt`，词表上限 32000，特殊 token 为 `<|endoftext|>`。
+默认读取 `/ai/lmfs2026/data/assignment1-data/owt_train.txt`，词表上限 32000，特殊 token 为 `<|endoftext|>`。
 可传 `--num-threads N`；不传则沿用已有 BPE 实现的自动策略。
-在完整 `/data/assignment1-data/owt_valid.txt` 上，以刚加载的分词器计时 encode、decode 和逐字相等检查。
+在完整 `/ai/lmfs2026/data/assignment1-data/owt_valid.txt` 上，以刚加载的分词器计时 encode、decode 和逐字相等检查。
 读文件、加载分词器、生成表格及上传均在该计时区间之外。
 
 W&B 提供完整源码、前 200 个 token 表、`bpe/valid_seconds` 和 `bpe/roundtrip_passed`。
@@ -83,7 +91,7 @@ bash run_server.sh train \
 可在独立目录运行小样本 CPU 基准，不启动正式训练、不创建 W&B Run，也不修改公共数据：
 
 ```bash
-python benchmark_encoding.py \
+python -m scripts.benchmark_encoding \
   --tokenizer-prefix /绝对路径/本人BPE/bpe/tokenizer \
   --sample-mib 32 --workers 1 4 8 --output encoding-benchmark.json
 ```

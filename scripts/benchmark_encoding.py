@@ -22,7 +22,7 @@ def file_digest(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tokenizer-prefix", type=Path, required=True)
-    parser.add_argument("--source", type=Path, default=Path("/data/assignment1-data/owt_train.txt"))
+    parser.add_argument("--source", type=Path, default=Path("/ai/lmfs2026/data/assignment1-data/owt_train.txt"))
     parser.add_argument("--sample-mib", type=int, default=32)
     parser.add_argument("--workers", type=int, nargs="+", default=[1, 4, 8])
     parser.add_argument("--output", type=Path)

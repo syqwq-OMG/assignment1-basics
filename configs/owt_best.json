@@ -1,0 +1,25 @@
+{
+  "description": "Best completed OWT experiment: d8a4c914791a, full-validation PPL 27.938069335964723",
+  "data": {
+    "train_text": "/ai/lmfs2026/data/assignment1-data/owt_train.txt",
+    "val_text": "/ai/lmfs2026/data/assignment1-data/owt_valid.txt"
+  },
+  "model": {
+    "d_model": 768, "d_ff": 2048, "num_layers": 8, "num_heads": 12,
+    "context_length": 512, "rope_theta": 10000
+  },
+  "training": {
+    "batch_size": 64, "max_iters": 1000000, "max_lr": 0.0006, "min_lr": 0.00006,
+    "warmup_iters": 500, "cosine_cycle_iters": 89662,
+    "beta1": 0.9, "beta2": 0.95, "eps": 1e-8, "weight_decay": 0.1,
+    "max_grad_norm": 1.0, "precision": "bf16", "compile_model": true,
+    "seed": 42, "device": "cuda", "log_interval": 100,
+    "eval_interval": 1000, "eval_iters": 10, "checkpoint_interval": 10000
+  },
+  "encoding": {
+    "encoding_workers": 8, "encoding_cache_size": 65536, "encoding_chunk_mib": 1
+  },
+  "budget": {
+    "max_train_seconds": 21600, "finalize_reserve_seconds": 900
+  }
+}
